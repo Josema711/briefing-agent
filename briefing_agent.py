@@ -2,11 +2,10 @@
 """
 YSL Beauty Intelligence Briefing Agent
 ---------------------------------------
-Lee credenciales desde variables de entorno (GitHub Secrets en producción,
-archivo .env en desarrollo local).
+Usa Google Gemini API (gratuito) con búsqueda web integrada.
+Lee credenciales desde variables de entorno (GitHub Secrets en producción).
 """
 
-import anthropic
 import smtplib
 import json
 import os
@@ -15,6 +14,8 @@ import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+import google.generativeai as genai
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 
@@ -36,27 +37,27 @@ def get_env(key: str) -> str:
         raise EnvironmentError(f"Variable de entorno '{key}' no definida. Revisa los GitHub Secrets.")
     return val
 
-ANTHROPIC_API_KEY = get_env("ANTHROPIC_API_KEY")
-GMAIL_USER        = get_env("GMAIL_USER")
+GEMINI_API_KEY     = get_env("GEMINI_API_KEY")
+GMAIL_USER         = get_env("GMAIL_USER")
 GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
-RECIPIENT_EMAIL   = get_env("RECIPIENT_EMAIL")
-RECIPIENT_NAME    = get_env("RECIPIENT_NAME")
-TEST_MODE         = os.environ.get("TEST_MODE", "false").lower() == "true"
+RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
+RECIPIENT_NAME     = get_env("RECIPIENT_NAME")
+TEST_MODE          = os.environ.get("TEST_MODE", "false").lower() == "true"
 
 # ─── Prompts ────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """Eres un agente de inteligencia estratégica de marketing de lujo, especializado en YSL Beauty y el universo L'Oréal Luxe.
- 
+
 Tu destinataria es una Brand Manager de YSL Beauty que trabaja tanto en perfumería/fragancias como en maquillaje/cosmética. Necesita este briefing para:
 - Estar al día de todo lo relevante en su industria
 - Encontrar inspiración y referencias para su trabajo diario
 - Tener contenido y ángulos interesantes para compartir en LinkedIn
 - Anticipar movimientos del mercado y de la competencia
- 
+
 Usas búsqueda web para encontrar noticias REALES y recientes de los últimos 7 días. Nunca inventes noticias.
- 
+
 Responde ÚNICAMENTE con un objeto JSON válido, sin markdown, sin texto adicional, sin backticks.
- 
+
 Estructura exacta:
 {
   "semana": "DD MMM YYYY",
@@ -92,72 +93,73 @@ Estructura exacta:
   },
   "frase_inspiracion": "Cita o frase relacionada con creatividad, belleza, lujo o estrategia. Puede ser de un creativo, diseñador, directivo del sector o pensador relevante"
 }
- 
+
 Incluye entre 6 y 8 artículos, equilibrados entre fragancias y maquillaje, y entre los distintos competidores. Prioriza siempre noticias reales de los últimos 7 días."""
+
 
 def build_user_prompt() -> str:
     today = datetime.now().strftime("%A %d de %B de %Y")
     return f"""Genera el briefing semanal de inteligencia para una Brand Manager de YSL Beauty en L'Oréal Luxe.
 Fecha de hoy: {today}.
- 
+
 Busca noticias reales de los últimos 7 días en estas áreas:
- 
+
 FRAGANCIAS & PERFUMERÍA:
 - Lanzamientos de fragancias de lujo (YSL, Dior, Chanel, Givenchy, Tom Ford, Maison Margiela, Armani)
 - Colaboraciones de perfumería con artistas, celebrities o marcas de moda
 - Tendencias olfativas emergentes y movimientos en el mercado de nicho
 - Campañas de comunicación de fragancias destacadas
 - Innovaciones en packaging, retail experience o storytelling de fragancia
- 
+
 MAQUILLAJE & COSMÉTICA DE LUJO:
 - Lanzamientos de maquillaje de lujo y campañas asociadas
 - Movimientos de YSL Beauté (Rouge Sur Mesure, Libre, Black Opium, cualquier novedad)
 - Tendencias de maquillaje que están ganando tracción en redes sociales
 - Colaboraciones beauty con artistas, diseñadores o influencers de lujo
 - Innovaciones en fórmulas, tecnología beauty o experiencia de compra
- 
+
 MARKETING & ESTRATEGIA:
 - Campañas de marketing de lujo especialmente creativas o disruptivas
 - Movimientos estratégicos de Dior Beauty, Chanel Beauty, Givenchy Beauty, Tom Ford Beauty, Armani Beauty, Lancôme
 - Ambassador deals y fichajes de embajadores en el sector lujo
 - Estrategias digitales y de redes sociales de marcas de lujo
 - Noticias de L'Oréal Group relevantes para el segmento de lujo
- 
+
 DIGITAL & CULTURA:
 - Tendencias en TikTok e Instagram relacionadas con beauty de lujo
 - Creadores de contenido beauty de lujo que están despuntando
 - Colaboraciones entre moda y belleza de lujo
 - Momentos culturales (alfombras rojas, fashion weeks, eventos) con relevancia beauty
 - Conversaciones en LinkedIn sobre marketing de lujo y belleza
- 
-Asegúrate de que todas las noticias sean reales, verificadas y de los últimos 7 días. Si no encuentras suficientes noticias muy recientes en alguna categoría, prioriza las más recientes disponibles e indícalo."""
 
-# ─── Generar briefing con Claude + web search ────────────────────────────────
+Asegúrate de que todas las noticias sean reales, verificadas y de los últimos 7 días."""
+
+
+# ─── Generar briefing con Gemini + Google Search ─────────────────────────────
 
 def generate_briefing() -> dict:
-    log.info("Generando briefing con Claude + web search...")
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    log.info("Generando briefing con Gemini + Google Search...")
 
-    response = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": build_user_prompt()}],
+    genai.configure(api_key=GEMINI_API_KEY)
+
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=SYSTEM_PROMPT,
+        tools="google_search_retrieval",
     )
 
-    text_content = ""
-    for block in response.content:
-        if block.type == "text":
-            text_content += block.text
+    prompt = build_user_prompt()
+    response = model.generate_content(prompt)
+    text_content = response.text
 
     if not text_content.strip():
-        raise ValueError("Claude no devolvió contenido de texto")
+        raise ValueError("Gemini no devolvió contenido de texto")
 
     clean = text_content.replace("```json", "").replace("```", "").strip()
     briefing = json.loads(clean)
     log.info(f"Briefing generado: {len(briefing.get('articulos', []))} artículos")
     return briefing
+
 
 # ─── Renderizar HTML del email ───────────────────────────────────────────────
 
@@ -166,55 +168,110 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     articulos_html = ""
 
     cat_colors = {
-        "COLABORACIONES": "#7c6fcd",
-        "TENDENCIAS": "#c9a84c",
-        "CAMPAÑAS": "#d4537e",
-        "COMPETENCIA": "#4a9eca",
-        "INFLUENCERS": "#e8854a",
+        "COLABORACIONES":   "#7c6fcd",
+        "TENDENCIAS":       "#c9a84c",
+        "CAMPAÑAS":         "#d4537e",
+        "COMPETENCIA":      "#4a9eca",
+        "INFLUENCERS":      "#e8854a",
         "RETAIL & DIGITAL": "#5aad8a",
+        "FRAGANCIAS":       "#9b6fa8",
+        "MAQUILLAJE":       "#d4537e",
     }
     cat_icons = {
-        "COLABORACIONES": "🤝",
-        "TENDENCIAS": "📈",
-        "CAMPAÑAS": "📣",
-        "COMPETENCIA": "👁️",
-        "INFLUENCERS": "⭐",
+        "COLABORACIONES":   "🤝",
+        "TENDENCIAS":       "📈",
+        "CAMPAÑAS":         "📣",
+        "COMPETENCIA":      "👁️",
+        "INFLUENCERS":      "⭐",
         "RETAIL & DIGITAL": "📱",
+        "FRAGANCIAS":       "🌸",
+        "MAQUILLAJE":       "💄",
     }
 
     for art in data.get("articulos", []):
-        cat = art.get("categoria", "").upper()
-        color = cat_colors.get(cat, "#888")
-        icon = cat_icons.get(cat, "•")
-        url = art.get("url", "")
+        cat    = art.get("categoria", "").upper()
+        color  = cat_colors.get(cat, "#888")
+        icon   = cat_icons.get(cat, "•")
+        url    = art.get("url", "")
         titulo = art.get("titulo", "")
-        titulo_html = f'<a href="{url}" style="color:#1a1a1a;text-decoration:none;">{titulo}</a>' if url else titulo
+        titulo_html   = f'<a href="{url}" style="color:#1a1a1a;text-decoration:none;">{titulo}</a>' if url else titulo
+        linkedin_hook = art.get("linkedin_hook", "")
 
         articulos_html += f"""
         <div style="border:1px solid #e8e0d4;border-radius:8px;padding:18px 22px;margin-bottom:14px;background:#fff;">
           <div style="font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:{color};font-weight:600;margin-bottom:8px;">
             {icon} {cat}
           </div>
-          <div style="font-family:'Georgia',serif;font-size:17px;font-weight:400;color:#1a1a1a;line-height:1.3;margin-bottom:8px;">
+          <div style="font-family:'Georgia',serif;font-size:17px;font-weight:400;color:#1a1a1a;line-height:1.3;margin-bottom:10px;">
             {titulo_html}
           </div>
-          <div style="font-size:13px;color:#555;line-height:1.65;margin-bottom:8px;">
-            {art.get('resumen', '')}
+          <div style="font-size:13px;color:#333;line-height:1.7;margin-bottom:6px;">
+            <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Qué pasó</strong><br>
+            {art.get('que_paso', '')}
           </div>
-          <div style="font-size:12px;color:{color};font-style:italic;">
-            ✦ {art.get('relevancia_ysl', '')}
+          <div style="font-size:13px;color:#444;line-height:1.7;margin-bottom:6px;margin-top:10px;">
+            <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Por qué importa</strong><br>
+            {art.get('por_que_importa', '')}
           </div>
-          <div style="font-size:11px;color:#999;margin-top:6px;">
+          <div style="font-size:12.5px;color:{color};line-height:1.6;margin-top:10px;font-style:italic;">
+            ✦ <strong>Ángulo YSL:</strong> {art.get('angulo_ysl', '')}
+          </div>
+          {f'<div style="background:#faf7f2;border-left:3px solid #c9a84c;padding:10px 14px;margin-top:10px;border-radius:0 6px 6px 0;font-size:12px;color:#5a4a1a;font-style:italic;">💼 <strong>LinkedIn hook:</strong> {linkedin_hook}</div>' if linkedin_hook else ''}
+          <div style="font-size:11px;color:#bbb;margin-top:10px;">
             {art.get('fuente', '')}
           </div>
         </div>"""
 
+    competencia = data.get("competencia_radar", {})
+    competencia_html = f"""
+    <tr><td style="background:#fff;padding:0 36px 24px;">
+      <div style="height:0.5px;background:#e8e0d4;margin-bottom:20px;"></div>
+      <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#4a9eca;margin-bottom:12px;">👁️ Radar competencia</div>
+      <div style="font-size:13px;color:#333;line-height:1.7;margin-bottom:10px;">{competencia.get('resumen', '')}</div>
+      <div style="background:#f0f6ff;border-left:3px solid #4a9eca;padding:12px 16px;border-radius:0 6px 6px 0;font-size:12.5px;color:#1a3a5c;font-style:italic;">
+        ⚡ {competencia.get('amenaza_oportunidad', '')}
+      </div>
+    </td></tr>""" if competencia else ""
+
+    tendencia = data.get("tendencia_emergente", {})
+    tendencia_html = f"""
+    <tr><td style="background:#fff;padding:0 36px 24px;">
+      <div style="height:0.5px;background:#e8e0d4;margin-bottom:20px;"></div>
+      <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#c9a84c;margin-bottom:6px;">📡 Tendencia emergente</div>
+      <div style="font-family:'Georgia',serif;font-size:16px;color:#1a1a1a;margin-bottom:10px;">{tendencia.get('nombre', '')}</div>
+      <div style="font-size:13px;color:#444;line-height:1.7;margin-bottom:10px;">{tendencia.get('descripcion', '')}</div>
+      <div style="font-size:12.5px;color:#7a5a00;font-style:italic;">✦ {tendencia.get('relevancia_practica', '')}</div>
+    </td></tr>""" if tendencia else ""
+
+    digital = data.get("digital_social", "")
+    digital_html = f"""
+    <tr><td style="background:#fff;padding:0 36px 24px;">
+      <div style="height:0.5px;background:#e8e0d4;margin-bottom:20px;"></div>
+      <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#5aad8a;margin-bottom:10px;">📱 Digital & Social esta semana</div>
+      <div style="font-size:13px;color:#333;line-height:1.7;">{digital}</div>
+    </td></tr>""" if digital else ""
+
+    linkedin = data.get("para_linkedin", {})
+    linkedin_html = f"""
+    <tr><td style="background:#faf7f2;padding:24px 36px;">
+      <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#c9a84c;margin-bottom:12px;">💼 Para tu LinkedIn esta semana</div>
+      <div style="font-size:13px;color:#333;margin-bottom:6px;"><strong>Tema:</strong> {linkedin.get('tema', '')}</div>
+      <div style="font-size:13px;color:#555;margin-bottom:12px;"><strong>Ángulo:</strong> {linkedin.get('angulo', '')}</div>
+      <div style="background:#fff;border:1px solid #e8e0d4;border-radius:8px;padding:14px 18px;font-family:'Georgia',serif;font-size:15px;color:#1a1a1a;font-style:italic;line-height:1.5;">
+        "{linkedin.get('opening_line', '')}"
+      </div>
+    </td></tr>""" if linkedin else ""
+
     frase = data.get("frase_inspiracion", "")
     frase_html = f"""<tr><td style="background:#0a0a0a;padding:20px 36px;">
-      <div style="font-family:Georgia,serif;font-size:14px;font-style:italic;color:#c9a84c;text-align:center;letter-spacing:0.05em;">
-        &ldquo;{frase}&rdquo;
-      </div>
+      <div style="font-family:Georgia,serif;font-size:14px;font-style:italic;color:#c9a84c;text-align:center;">&ldquo;{frase}&rdquo;</div>
     </td></tr>""" if frase else ""
+
+    estado = data.get("estado_del_mercado", "")
+    estado_html = f"""
+    <tr><td style="background:#fff;padding:0 36px 24px;">
+      <div style="font-size:13px;color:#555;line-height:1.75;font-style:italic;border-left:3px solid #e8e0d4;padding-left:16px;">{estado}</div>
+    </td></tr>""" if estado else ""
 
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -232,15 +289,16 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       <div style="font-family:'Georgia',serif;font-size:28px;font-weight:300;color:#fff;letter-spacing:0.08em;line-height:1.1;">Intelligence Briefing</div>
       <div style="font-size:11px;letter-spacing:0.15em;color:#888;text-transform:uppercase;margin-top:8px;">{fecha} · Edición semanal</div>
     </td></tr>
-    <tr><td style="background:#fff;padding:24px 36px 0;">
+    <tr><td style="background:#fff;padding:24px 36px 8px;">
       <div style="font-family:'Georgia',serif;font-size:15px;color:#333;font-style:italic;">Bonjour, {recipient_name} —</div>
     </td></tr>
-    <tr><td style="background:#fff;padding:18px 36px 24px;">
-      <div style="border-left:3px solid #c9a84c;padding:12px 16px;background:#faf7f2;border-radius:0 6px 6px 0;">
-        <div style="font-size:10px;letter-spacing:0.25em;text-transform:uppercase;color:#c9a84c;font-weight:600;margin-bottom:6px;">Insight de la semana</div>
-        <div style="font-family:'Georgia',serif;font-size:16px;font-style:italic;color:#1a1a1a;line-height:1.5;">{data.get('insight_semana', '')}</div>
+    <tr><td style="background:#fff;padding:12px 36px 24px;">
+      <div style="border-left:3px solid #c9a84c;padding:14px 18px;background:#faf7f2;border-radius:0 6px 6px 0;">
+        <div style="font-size:10px;letter-spacing:0.25em;text-transform:uppercase;color:#c9a84c;font-weight:600;margin-bottom:8px;">Insight de la semana</div>
+        <div style="font-family:'Georgia',serif;font-size:17px;font-style:italic;color:#1a1a1a;line-height:1.55;">{data.get('insight_semana', '')}</div>
       </div>
     </td></tr>
+    {estado_html}
     <tr><td style="background:#fff;padding:0 36px;">
       <div style="height:0.5px;background:#e8e0d4;"></div>
       <div style="text-align:center;margin:-8px 0 16px;">
@@ -248,27 +306,27 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       </div>
     </td></tr>
     <tr><td style="background:#fff;padding:0 36px 24px;">{articulos_html}</td></tr>
-    <tr><td style="background:#fff;padding:0 36px 24px;">
-      <div style="height:0.5px;background:#e8e0d4;margin-bottom:20px;"></div>
-      <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#c9a84c;margin-bottom:10px;">📡 En el radar</div>
-      <div style="font-size:13.5px;color:#444;line-height:1.65;">{data.get('tendencia_emergente', '')}</div>
-    </td></tr>
+    {competencia_html}
+    {tendencia_html}
+    {digital_html}
     <tr><td style="background:#fff;padding:0 36px 28px;">
-      <div style="background:#f0faf5;border:1px solid #c5e8d5;border-radius:8px;padding:16px 20px;">
-        <div style="font-size:10px;letter-spacing:0.25em;text-transform:uppercase;color:#2d7a52;font-weight:600;margin-bottom:6px;">✅ Acción para esta semana</div>
-        <div style="font-size:13px;color:#2d4a3a;line-height:1.6;">{data.get('accion_sugerida', '')}</div>
+      <div style="background:#f0faf5;border:1px solid #c5e8d5;border-radius:8px;padding:18px 22px;">
+        <div style="font-size:10px;letter-spacing:0.25em;text-transform:uppercase;color:#2d7a52;font-weight:600;margin-bottom:8px;">✅ Acción para esta semana</div>
+        <div style="font-size:13.5px;color:#2d4a3a;line-height:1.7;">{data.get('accion_sugerida', '')}</div>
       </div>
     </td></tr>
+    {linkedin_html}
     {frase_html}
     <tr><td style="background:#1a1a1a;padding:20px 36px;border-radius:0 0 10px 10px;">
       <div style="font-size:10px;color:#666;text-align:center;letter-spacing:0.1em;">YSL BEAUTY INTELLIGENCE · GENERADO CON IA · {fecha}</div>
-      <div style="font-size:10px;color:#444;text-align:center;margin-top:4px;">Powered by Claude + Anthropic Web Search</div>
+      <div style="font-size:10px;color:#444;text-align:center;margin-top:4px;">Powered by Gemini + Google Search</div>
     </td></tr>
   </table>
   </td></tr>
 </table>
 </body>
 </html>"""
+
 
 # ─── Enviar email ────────────────────────────────────────────────────────────
 
@@ -285,6 +343,7 @@ def send_email(html_body: str, subject: str):
         server.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
     log.info("✅ Email enviado correctamente")
 
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -293,10 +352,10 @@ def main():
     log.info(f"TEST_MODE: {TEST_MODE}")
     log.info("=" * 55)
 
-    briefing = generate_briefing()
+    briefing     = generate_briefing()
     fecha_bonita = datetime.now().strftime("%d %b %Y")
-    subject = f"✦ YSL Intelligence Briefing · {fecha_bonita}"
-    html = render_email_html(briefing, RECIPIENT_NAME)
+    subject      = f"✦ YSL Intelligence Briefing · {fecha_bonita}"
+    html         = render_email_html(briefing, RECIPIENT_NAME)
 
     if TEST_MODE:
         log.info("TEST MODE — email no enviado. Briefing generado:")
