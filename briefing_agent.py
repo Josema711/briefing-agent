@@ -366,8 +366,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     </td></tr>
 
     <tr><td style="background:{C_WHITE};padding:18px 28px 8px;">
-      <div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.65;">Hola {recipient_name} 👋 Aquí tienes lo más importante de la semana — tendencias, novedades, movimientos de YSL y la competencia, y tus dos posts de LinkedIn listos para publicar.</div>
-    </td></tr>
+<div style="font-size:13.5px;color:{C_TEXT};line-height:1.75;">Hola {recipient_name} 💛<br><br>Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>    </td></tr>
 
     {tendencias_section}
     {novedades_section}
