@@ -156,6 +156,9 @@ Selecciona entre 6 y 8 noticias de las que te doy, las más relevantes para YSL 
 def generate_briefing(articles: list[dict]) -> dict:
     log.info("Generando briefing con Groq...")
 
+    from groq import Groq
+    client = Groq(api_key=GROQ_API_KEY)
+
     articles_text = "\n\n".join([
         f"- Título: {a['title']}\n  Descripción: {a['description']}\n  Fuente: {a['source']}\n  URL: {a['url']}\n  Fecha: {a['publishedAt']}"
         for a in articles
@@ -170,29 +173,17 @@ Aquí tienes las noticias de los últimos 7 días relacionadas con el sector bea
 
 Recuerda: usa SOLO las noticias del listado, selecciona las más relevantes para YSL Beauty y responde únicamente con el JSON."""
 
-    payload = json.dumps({
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_prompt},
         ],
-        "temperature": 0.7,
-        "max_tokens":  4096,
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        "https://api.groq.com/openai/v1/chat/completions",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type":  "application/json",
-        },
+        temperature=0.7,
+        max_tokens=4096,
     )
 
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read().decode())
-
-    text_content = data["choices"][0]["message"]["content"]
+    text_content = response.choices[0].message.content
 
     if not text_content.strip():
         raise ValueError("Groq no devolvió contenido")
