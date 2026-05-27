@@ -1,74 +1,106 @@
-# YSL Beauty Intelligence Briefing Agent
+# Beauty Briefing Agent
 
-Agente que genera y envía automáticamente un briefing semanal de marketing de lujo **cada domingo a las 9AM** usando GitHub Actions — sin servidores, sin cron local, 100% gratuito.
+Agente que genera y envía automáticamente un briefing semanal de belleza y lujo **cada lunes a las 9AM** usando GitHub Actions — sin servidores, sin cron local, 100% automático.
 
-## Arquitectura
+## Qué hace
 
-```
-GitHub Actions (cron domingo 9AM)
-        ↓
-briefing_agent.py
-        ↓
-Claude API + Web Search  →  JSON estructurado
-        ↓
-Gmail SMTP  →  Email HTML en bandeja de tu novia
-```
+Cada lunes por la mañana, sin que nadie haga nada:
+
+1. **Busca noticias reales** con Tavily (búsqueda con contenido completo, no solo titulares)
+2. **Filtra lo ya visto** — gracias a la memoria entre semanas, nunca repite una noticia
+3. **Genera el briefing** con Groq (llama-3.3-70b) en español
+4. **Envía el email** con diseño editorial en tonos nude y terracota
+5. **Guarda la memoria** automáticamente en el repo para la semana siguiente
+
+## Qué incluye el email
+
+- 📈 **Tendencias** — qué está trending en beauty y moda de lujo
+- ✨ **Novedades** — lanzamientos y campañas nuevas
+- 🏛️ **Casas de lujo** — noticias importantes de LVMH, Kering y las grandes maisons
+- 👁️ **YSL Beauty & Competencia** — foco en YSL, Dior, Chanel, Tom Ford, Givenchy, Armani, Lancôme
+- 📱 **Digital & Social Media** — TikTok, Instagram, radar competencia digital, tendencia emergente
+- 🪒 **El Rincón** — apartado semanal de grooming, fragancias y skincare masculina de lujo
+- 💼 **2 posts de LinkedIn** completos y listos para publicar
+
+Si hay noticias de España, aparecen primero con badge 🇪🇸 dentro de su sección.
+
+## Stack
+
+| Herramienta | Para qué | Coste |
+|---|---|---|
+| **Tavily API** | Búsqueda de noticias con contenido real | Gratis hasta 1.000 búsquedas/mes |
+| **Groq API** | IA para generar el briefing (llama-3.3-70b) | Gratis |
+| **Gmail SMTP** | Envío del email | Gratis |
+| **GitHub Actions** | Automatización del cron semanal + logs | Gratis |
+
+**Coste total: 0€/mes**
 
 ---
 
-## Setup en 10 minutos
+## Setup
 
-### 1. Subir a GitHub
+### 1. Clonar o subir el repo a GitHub
 
-```bash
-git init
-git add .
-git commit -m "YSL briefing agent"
-git remote add origin https://github.com/TU_USUARIO/ysl-briefing-agent.git
-git push -u origin main
+Asegúrate de tener esta estructura:
+
+```
+briefing-agent/
+├── .github/
+│   └── workflows/
+│       └── weekly_briefing.yml
+├── briefing_agent.py
+├── memory.json
+├── requirements.txt
+├── .env.example
+├── .gitignore
+└── README.md
 ```
 
-### 2. Añadir los Secrets en GitHub
+### 2. Conseguir las API keys gratuitas
+
+**Tavily** (búsqueda de noticias):
+1. Ve a [tavily.com](https://tavily.com) → Sign up
+2. Dashboard → API Keys → copia tu key (`tvly-...`)
+
+**Groq** (la IA):
+1. Ve a [console.groq.com](https://console.groq.com) → Sign up con Google
+2. API Keys → Create API key → copia tu key (`gsk_...`)
+
+**Gmail App Password** (para enviar el email):
+1. [myaccount.google.com](https://myaccount.google.com) → Seguridad
+2. Verificación en 2 pasos → actívala si no está
+3. Contraseñas de aplicaciones → crea una → nombre: `Beauty Briefing`
+4. Copia los 16 caracteres generados
+
+### 3. Añadir los Secrets en GitHub
 
 Ve a tu repo → **Settings → Secrets and variables → Actions → New repository secret**
 
-Añade estos 5 secrets:
-
 | Secret | Valor |
-|--------|-------|
-| `ANTHROPIC_API_KEY` | La API key de la amiga de tu novia |
+|---|---|
+| `TAVILY_API_KEY` | Tu key de Tavily (`tvly-...`) |
+| `GROQ_API_KEY` | Tu key de Groq (`gsk_...`) |
 | `GMAIL_USER` | El Gmail desde el que se envía |
-| `GMAIL_APP_PASSWORD` | App Password de Gmail (ver paso 3) |
-| `RECIPIENT_EMAIL` | El correo de tu novia |
+| `GMAIL_APP_PASSWORD` | Los 16 caracteres del App Password |
+| `RECIPIENT_EMAIL` | El correo de la destinataria |
 | `RECIPIENT_NAME` | Su nombre (para el saludo) |
 
-> ✅ Los secrets están **encriptados** en GitHub. Ni tú los puedes ver una vez guardados. La amiga de tu novia puede rotar la key cuando quiera sin tocar el código.
-
-### 3. Crear Gmail App Password
-
-Gmail no permite SMTP con tu contraseña normal:
-
-1. [myaccount.google.com](https://myaccount.google.com) → **Seguridad**
-2. Activa **Verificación en 2 pasos** si no está
-3. Busca **Contraseñas de aplicaciones**
-4. Crea una: App "Correo", Dispositivo "Otro" → escribe `YSL Agent`
-5. Copia los 16 caracteres → pégalos como `GMAIL_APP_PASSWORD`
-
-### 4. Probar antes del domingo
+### 4. Probar antes del lunes
 
 En GitHub → **Actions → YSL Beauty Intelligence Briefing → Run workflow**
 
-Aparece un botón "Run workflow" manual. Puedes elegir `test_mode = true` para que genere el briefing pero **no envíe el email** (útil para ver si la API funciona sin gastar créditos de envío).
+- `test_mode: true` → genera el briefing pero **no envía el email** (para verificar que todo funciona)
+- `test_mode: false` → envío real
 
 ---
 
-## Ver logs
+## Cómo funciona la memoria
 
-GitHub guarda los logs de cada ejecución automáticamente:
+Después de cada ejecución, el agente guarda en `memory.json` las URLs y temas cubiertos esa semana. La siguiente semana los filtra antes de buscar, así el contenido siempre es fresco.
 
-**Actions → click en el run → "send-briefing"** → ves todo en tiempo real.
+El archivo se actualiza solo — el workflow hace un `git commit` automático cada lunes con el mensaje `Update memory [skip ci]`. No tienes que tocar nada.
 
-Si falla, GitHub sube automáticamente el `briefing_agent.log` como artefacto descargable (guardado 30 días).
+Guarda hasta **8 semanas de histórico** (~200 artículos) y luego borra lo más antiguo automáticamente.
 
 ---
 
@@ -76,46 +108,59 @@ Si falla, GitHub sube automáticamente el `briefing_agent.log` como artefacto de
 
 El cron está configurado para **07:00 UTC**, que equivale a:
 - 🌞 **09:00 AM en verano** (España, UTC+2)
-- ⚠️ En invierno (octubre–marzo) llega a las 8AM. Para mantener las 9AM en invierno, cambia el cron en `.github/workflows/weekly_briefing.yml` a `'0 8 * * 0'`
+- ⚠️ En invierno (octubre–marzo) llega a las 8AM. Para mantener las 9AM en invierno, cambia la línea del cron en `.github/workflows/weekly_briefing.yml`:
+
+```yaml
+# Verano (UTC+2)
+- cron: '0 7 * * 1'
+
+# Invierno (UTC+1)
+- cron: '0 8 * * 1'
+```
 
 ---
 
-## Gestionar la API key de la amiga
+## Ver los logs
 
-La API key vive **solo en GitHub Secrets**, nunca en el código. Para rotarla:
+GitHub guarda los logs de cada ejecución automáticamente:
 
-1. La amiga genera una nueva key en [console.anthropic.com](https://console.anthropic.com)
-2. Tú (o ella, si tiene acceso al repo) va a Settings → Secrets → actualiza `ANTHROPIC_API_KEY`
-3. Listo, sin tocar nada más
+**Actions → click en el run → "send-briefing"**
+
+Si falla, GitHub sube el `briefing_agent.log` como artefacto descargable (guardado 30 días).
+
+---
+
+## Desarrollo local
+
+```bash
+# Crea un archivo .env con tus credenciales (ver .env.example)
+cp .env.example .env
+
+# Instala dependencias
+pip install groq
+
+# Ejecuta en modo test (no envía email)
+TEST_MODE=true python briefing_agent.py
+
+# Ejecuta con envío real
+python briefing_agent.py
+```
 
 ---
 
 ## Estructura del proyecto
 
 ```
-ysl-briefing-agent/
+briefing-agent/
 ├── .github/
 │   └── workflows/
-│       └── weekly_briefing.yml   # GitHub Actions (el cron)
+│       └── weekly_briefing.yml   # GitHub Actions — cron lunes 9AM
 ├── briefing_agent.py             # Script principal
-├── requirements.txt              # anthropic
+├── memory.json                   # Memoria entre semanas (se actualiza solo)
+├── requirements.txt              # groq
 ├── .env.example                  # Template para desarrollo local
 ├── .gitignore                    # .env y logs excluidos
 └── README.md
 ```
 
-## Desarrollo local
-
-```bash
-cp .env.example .env
-# Edita .env con tus valores reales
-
-# Instala dependencias
-pip install -r requirements.txt
-
-# Ejecuta
-python briefing_agent.py
-
-# Para probar sin enviar email
-TEST_MODE=true python briefing_agent.py
-```
+> ⚠️ No subas nunca el archivo `.env` a GitHub — está en el `.gitignore` por defecto.
