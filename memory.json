@@ -1,1 +1,51 @@
-{"seen_urls": [], "seen_titles": [], "covered_topics": []}
+{
+  "seen_urls": [
+    "https://www.numeronetherlands.com/fashion/saint-laurent-launched-spring-2025-campaign-with-austin-butler",
+    "https://www.loreal.com/en/news/brands/ysl-beautys-abuse-is-not-love-program",
+    "https://www.fzine.com/beauty/new-beauty-launches-dior-science-skincare-sigi-skin-mini-chanel-liner-shop",
+    "https://www.loreal.com/en/luxe-division",
+    "https://luxurysociety.com/en/will-kering-be-next-beauty-disruptor",
+    "https://www.businessoffashion.com/articles/luxury/will-lvmh-and-kering-continue-to-dominate-luxury-fashion",
+    "https://www.loreal.com/en/news/brands/ysl-beautys-abuse-is-not-love-program",
+    "https://www.fzine.com/beauty/new-beauty-launches-dior-science-skincare-sigi-skin-mini-chanel-liner-shop",
+    "https://www.fzine.com/beauty/new-beauty-launches-dior-science-skincare-sigi-skin-mini-chanel-liner-shop",
+    "https://www.businessoffashion.com/articles/beauty/whats-in-store-for-tom-ford-beauty",
+    "https://wwd.com/fashion-news/designer-luxury/feature/tale-of-the-tape-giorgio-armani-vs-tom-ford-3421295-1210658"
+  ],
+  "seen_titles": [
+    "Lujo sostenible",
+    "Tendencias de maquillaje",
+    "Fragancias de lujo",
+    "Campaña de primavera 2025",
+    "Campaña 'Don't Call It Love'",
+    "Nueva campaña de maquillaje",
+    "L'Oréal Luxe Division",
+    "Kering Beauté",
+    "LVMH y Kering dominan el lujo",
+    "Campaña 'Don't Call It Love'",
+    "Nueva campaña de maquillaje",
+    "Nueva campaña de maquillaje",
+    "Campaña 'Don't Call It Love'",
+    "Nueva campaña de maquillaje",
+    "Nueva fragancia para hombre",
+    "Nueva colección de ropa para hombre"
+  ],
+  "covered_topics": [
+    "Lujo sostenible (2026-05-27)",
+    "Tendencias de maquillaje (2026-05-27)",
+    "Fragancias de lujo (2026-05-27)",
+    "Saint Laurent (2026-05-27)",
+    "YSL Beauty (2026-05-27)",
+    "Dior (2026-05-27)",
+    "L'Oréal (2026-05-27)",
+    "Kering (2026-05-27)",
+    "LVMH (2026-05-27)",
+    "YSL Beauty (2026-05-27)",
+    "Dior (2026-05-27)",
+    "Chanel (2026-05-27)",
+    "YSL Beauty (2026-05-27)",
+    "Dior (2026-05-27)",
+    "Tom Ford (2026-05-27)",
+    "Giorgio Armani (2026-05-27)"
+  ]
+}
