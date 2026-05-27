@@ -2,10 +2,10 @@
 """
 YSL Beauty Intelligence Briefing Agent
 ---------------------------------------
-- Busca noticias worldwide de lujo, beauty y moda
-- Prioriza noticias de España si las hay
-- Cubre: tendencias, novedades, noticias de casas de lujo, YSL Beauty y competencia
-- Genera 2 posts de LinkedIn listos para publicar
+- Tavily para búsqueda real de artículos con contenido completo
+- Groq (llama) para generar el briefing en español
+- Memoria entre semanas en memory.json — no repite noticias
+- Gmail SMTP para enviar el email
 """
 
 import smtplib
@@ -37,89 +37,147 @@ def get_env(key: str) -> str:
     return val
 
 GROQ_API_KEY       = get_env("GROQ_API_KEY")
-NEWS_API_KEY       = get_env("NEWS_API_KEY")
+TAVILY_API_KEY     = get_env("TAVILY_API_KEY")
 GMAIL_USER         = get_env("GMAIL_USER")
 GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
 RECIPIENT_NAME     = get_env("RECIPIENT_NAME")
 TEST_MODE          = os.environ.get("TEST_MODE", "false").lower() == "true"
 
-# ─── Búsquedas ───────────────────────────────────────────────────────────────
+MEMORY_FILE = "memory.json"
 
-QUERIES = [
-    # YSL Beauty y L'Oréal Luxe
-    "YSL Beauty Saint Laurent campaign launch",
-    "L'Oreal Luxe luxury beauty news",
-    # Competencia directa
-    "Dior Beauty Chanel beauty campaign 2025",
-    "Tom Ford beauty Givenchy Armani beauty",
-    "Lancôme luxury beauty launch",
-    # Tendencias beauty y moda lujo
-    "luxury beauty trend makeup fragrance",
-    "luxury fashion house beauty collaboration",
-    "perfume fragrance luxury launch 2025",
-    # Casas de lujo (moda + beauty)
-    "LVMH Kering luxury brand news",
-    "luxury fashion beauty news",
-]
+# ─── Memoria entre semanas ───────────────────────────────────────────────────
 
-ES_QUERIES = [
-    "YSL belleza lujo España",
-    "belleza lujo tendencia moda España",
-    "moda lujo beauty noticias España",
-]
-
-def fetch_articles(queries: list, language: str = "en", sources: str = None, max_per_query: int = 5) -> list[dict]:
-    articles = []
-    seen_urls = set()
-    date_from = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-
-    for query in queries:
-        params = {
-            "q": query,
-            "from": date_from,
-            "sortBy": "relevancy",
-            "language": language,
-            "pageSize": max_per_query,
-            "apiKey": NEWS_API_KEY,
-        }
-        if sources:
-            params["sources"] = sources
-
-        url = f"https://newsapi.org/v2/everything?{urllib.parse.urlencode(params)}"
+def load_memory() -> dict:
+    if os.path.exists(MEMORY_FILE):
         try:
-            with urllib.request.urlopen(url, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-                for art in data.get("articles", []):
-                    u = art.get("url", "")
-                    title = art.get("title", "")
-                    if u and u not in seen_urls and title and "[Removed]" not in title:
-                        seen_urls.add(u)
-                        articles.append({
-                            "title":       title,
-                            "description": art.get("description", "") or "",
-                            "source":      art.get("source", {}).get("name", ""),
-                            "url":         u,
-                            "publishedAt": art.get("publishedAt", ""),
-                        })
-        except Exception as e:
-            log.warning(f"Error buscando '{query}': {e}")
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"seen_urls": [], "seen_titles": [], "covered_topics": []}
 
+def save_memory(memory: dict):
+    # Mantener solo las últimas 8 semanas para no crecer indefinidamente
+    memory["seen_urls"]      = memory["seen_urls"][-200:]
+    memory["seen_titles"]    = memory["seen_titles"][-200:]
+    memory["covered_topics"] = memory["covered_topics"][-60:]
+    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(memory, f, ensure_ascii=False, indent=2)
+    log.info(f"Memoria guardada: {len(memory['seen_urls'])} URLs, {len(memory['covered_topics'])} temas")
+
+def filter_seen(articles: list, memory: dict) -> list:
+    seen_urls   = set(memory.get("seen_urls", []))
+    seen_titles = set(t.lower()[:60] for t in memory.get("seen_titles", []))
+    fresh = []
+    for a in articles:
+        url   = a.get("url", "")
+        title = a.get("title", "").lower()[:60]
+        if url not in seen_urls and title not in seen_titles:
+            fresh.append(a)
+    log.info(f"Filtrado memoria: {len(articles)} → {len(fresh)} artículos nuevos")
+    return fresh
+
+def update_memory(memory: dict, briefing: dict):
+    """Extrae URLs y temas del briefing generado y los guarda en memoria."""
+    sections = [
+        briefing.get("tendencias", []),
+        briefing.get("novedades", []),
+        briefing.get("noticias_casas_lujo", []),
+        briefing.get("ysl_y_competencia", []),
+        briefing.get("digital_social", {}).get("campanas_destacadas", []),
+        briefing.get("el_rincon", {}).get("items", []),
+    ]
+    for section in sections:
+        for item in section:
+            url   = item.get("url", "")
+            title = item.get("titulo", item.get("title", ""))
+            if url:
+                memory["seen_urls"].append(url)
+            if title:
+                memory["seen_titles"].append(title)
+            # Guardar tema/marca como tópico cubierto
+            topic = item.get("marca", item.get("casa", item.get("titulo", "")))
+            if topic:
+                memory["covered_topics"].append(f"{topic} ({datetime.now().strftime('%Y-%m-%d')})")
+
+
+# ─── Búsqueda con Tavily ─────────────────────────────────────────────────────
+
+SEARCH_QUERIES = [
+    # YSL y L'Oréal Luxe
+    "YSL Beauty Saint Laurent latest news campaign 2025",
+    "L'Oreal Luxe luxury beauty news this week",
+    # Competencia
+    "Dior Beauty Chanel beauty new campaign launch",
+    "Tom Ford Givenchy Armani beauty news",
+    "Lancôme luxury beauty launch 2025",
+    # Tendencias
+    "luxury beauty makeup trend 2025",
+    "luxury perfume fragrance launch news",
+    "luxury fashion house beauty news LVMH Kering",
+    # Digital y social
+    "luxury beauty TikTok viral trend campaign",
+    "luxury brand Instagram social media campaign beauty",
+    # España
+    "YSL belleza lujo España noticias",
+    "belleza lujo tendencia moda España 2025",
+    # Hombre
+    "men luxury fragrance grooming skincare launch 2025",
+]
+
+def tavily_search(query: str, max_results: int = 5) -> list[dict]:
+    payload = json.dumps({
+        "api_key":     TAVILY_API_KEY,
+        "query":       query,
+        "search_depth": "basic",
+        "max_results": max_results,
+        "include_answer": False,
+        "include_raw_content": False,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        "https://api.tavily.com/search",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode())
+
+    articles = []
+    for r in data.get("results", []):
+        articles.append({
+            "title":       r.get("title", ""),
+            "description": r.get("content", r.get("snippet", ""))[:400],
+            "source":      urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", ""),
+            "url":         r.get("url", ""),
+            "publishedAt": r.get("published_date", datetime.now().strftime("%Y-%m-%d")),
+        })
     return articles
 
 
-def fetch_news() -> tuple[list, list]:
-    log.info("Buscando noticias worldwide de lujo y beauty...")
-    global_articles = fetch_articles(QUERIES, language="en", max_per_query=5)
-    log.info(f"Artículos globales: {len(global_articles)}")
+def fetch_news(memory: dict) -> list[dict]:
+    log.info("Buscando noticias con Tavily...")
+    all_articles = []
+    seen_urls = set()
 
-    log.info("Buscando noticias en España...")
-    seen = {a["url"] for a in global_articles}
-    es_raw = fetch_articles(ES_QUERIES, language="es", max_per_query=5)
-    es_articles = [a for a in es_raw if a["url"] not in seen]
-    log.info(f"Artículos España: {len(es_articles)}")
+    for query in SEARCH_QUERIES:
+        try:
+            results = tavily_search(query, max_results=4)
+            for a in results:
+                url = a.get("url", "")
+                if url and url not in seen_urls and a.get("title") and "[Removed]" not in a.get("title", ""):
+                    seen_urls.add(url)
+                    all_articles.append(a)
+        except Exception as e:
+            log.warning(f"Error en búsqueda '{query}': {e}")
 
-    return global_articles[:30], es_articles[:10]
+    log.info(f"Total artículos encontrados: {len(all_articles)}")
+
+    # Filtrar los ya vistos en semanas anteriores
+    fresh_articles = filter_seen(all_articles, memory)
+    return fresh_articles[:40]
 
 
 # ─── Prompts ─────────────────────────────────────────────────────────────────
@@ -131,98 +189,120 @@ A partir de las noticias que recibes, genera un reporte semanal en español que 
 2. NOVEDADES — lanzamientos, campañas, colecciones nuevas
 3. NOTICIAS IMPORTANTES de casas de lujo (tanto moda como beauty)
 4. YSL BEAUTY Y COMPETENCIA — movimientos de YSL, Dior, Chanel, Tom Ford, Givenchy, Armani, Lancôme
+5. DIGITAL Y SOCIAL MEDIA — TikTok, Instagram, campañas digitales, radar competencia online, tendencia emergente
+6. EL RINCÓN — apartado sobre grooming, fragancias y skincare masculina de lujo (intégralo con naturalidad, con un título creativo diferente cada semana)
 
-Si hay noticias de España, dales prioridad y colócalas primero dentro de cada sección.
+Si hay noticias de España, dales prioridad dentro de su sección.
+Genera 2 posts de LinkedIn completos listos para publicar — tono de profesional joven con criterio propio.
 
-Además genera exactamente 2 posts de LinkedIn completos y listos para publicar, basados en las noticias más interesantes. Los posts deben sonar como escritos por una profesional joven del sector, con criterio y punto de vista propio — no como un comunicado de prensa.
-
-Tono general: cercano, directo, profesional sin ser aburrido.
+IMPORTANTE: Las noticias ya han sido pre-filtradas para eliminar temas repetidos de semanas anteriores. Usa solo las noticias del listado.
 
 Responde ÚNICAMENTE con JSON válido, sin markdown, sin backticks.
 
 {
   "semana": "DD de MMMM de YYYY",
   "frase_semana": "Una frase que capture el espíritu beauty-lujo de esta semana (máx 15 palabras)",
-
   "tendencias": [
     {
-      "titulo": "Nombre de la tendencia en español",
-      "descripcion": "Qué es, por qué está ganando fuerza ahora y qué implica para el sector (3-4 frases)",
-      "es_españa": true/false
+      "titulo": "Nombre de la tendencia",
+      "descripcion": "Qué es, por qué gana fuerza y qué implica (3-4 frases)",
+      "es_españa": false
     }
   ],
-
   "novedades": [
     {
       "marca": "Nombre de la marca",
-      "titulo": "Título claro de la novedad",
-      "descripcion": "Qué han lanzado o anunciado y por qué es relevante (2-3 frases)",
-      "fuente": "Nombre del medio",
+      "titulo": "Título de la novedad",
+      "descripcion": "Qué lanzaron/anunciaron y por qué importa (2-3 frases)",
+      "fuente": "Medio",
       "url": "URL",
-      "es_españa": true/false
+      "es_españa": false
     }
   ],
-
   "noticias_casas_lujo": [
     {
-      "casa": "Nombre de la casa de lujo",
-      "titulo": "Título de la noticia",
-      "descripcion": "Qué pasó y qué significa para el sector (2-3 frases)",
-      "fuente": "Nombre del medio",
+      "casa": "Casa de lujo",
+      "titulo": "Título",
+      "descripcion": "Qué pasó y qué significa (2-3 frases)",
+      "fuente": "Medio",
       "url": "URL",
-      "es_españa": true/false
+      "es_españa": false
     }
   ],
-
   "ysl_y_competencia": [
     {
-      "marca": "YSL Beauty | Dior Beauty | Chanel | Tom Ford | Givenchy | Armani Beauty | Lancôme | otra",
-      "titulo": "Título de la noticia",
-      "descripcion": "Qué hizo esta marca esta semana y por qué importa (2-3 frases)",
-      "fuente": "Nombre del medio",
+      "marca": "YSL Beauty | Dior | Chanel | Tom Ford | Givenchy | Armani | Lancôme",
+      "titulo": "Título",
+      "descripcion": "Qué hizo y por qué importa (2-3 frases)",
+      "fuente": "Medio",
       "url": "URL",
-      "es_españa": true/false
+      "es_españa": false
     }
   ],
-
+  "digital_social": {
+    "resumen": "Pulso digital de la semana en beauty-lujo (3-4 frases)",
+    "campanas_destacadas": [
+      {
+        "marca": "Marca",
+        "titulo": "Campaña",
+        "descripcion": "En qué consiste y por qué funciona (2 frases)",
+        "plataforma": "TikTok | Instagram | YouTube | multicanal",
+        "es_españa": false
+      }
+    ],
+    "radar_competencia": "Qué están haciendo los competidores de YSL en digital esta semana (2-3 frases)",
+    "tendencia_emergente": "La tendencia digital más relevante ahora mismo (2-3 frases)"
+  },
+  "el_rincon": {
+    "titulo": "Título creativo diferente cada semana (ej: Grooming notes, El otro lado del tocador, Para ellos también)",
+    "intro": "Frase de introducción natural (1 frase)",
+    "items": [
+      {
+        "marca": "Marca",
+        "titulo": "Novedad de grooming/fragancia/skincare masculina de lujo",
+        "descripcion": "Breve y relevante (2 frases)",
+        "fuente": "Medio",
+        "url": "URL"
+      }
+    ]
+  },
   "posts_linkedin": [
     {
-      "basado_en": "Título de la noticia o tendencia en la que se basa",
-      "post": "El post completo de LinkedIn, listo para copiar y publicar. Entre 150-250 palabras. Debe tener gancho en la primera frase, desarrollar un punto de vista propio, y terminar con una pregunta o reflexión que invite a la interacción. Incluir 3-5 hashtags al final."
+      "basado_en": "Noticia o tendencia base",
+      "post": "Post completo 150-250 palabras, gancho en primera frase, punto de vista propio, pregunta al final, 3-5 hashtags"
     },
     {
-      "basado_en": "Título de la noticia o tendencia en la que se basa",
-      "post": "Segundo post completo. Diferente tono o formato al primero — puede ser más personal, más analítico, o más provocador."
+      "basado_en": "Noticia o tendencia base",
+      "post": "Segundo post, tono diferente al primero"
     }
   ]
 }
 
-Cada sección puede tener entre 2 y 4 items. Si no hay noticias suficientes para una sección, incluye solo las que haya (mínimo 1).
-Si una noticia es de España, ponla la primera dentro de su sección."""
+Cada sección: entre 2 y 4 items. España primero si hay."""
 
 
-def generate_briefing(global_articles: list, es_articles: list) -> dict:
+def generate_briefing(articles: list, memory: dict) -> dict:
     log.info("Generando briefing con Groq...")
     client = Groq(api_key=GROQ_API_KEY)
 
-    def fmt(articles):
-        if not articles:
-            return "No se encontraron artículos."
-        return "\n\n".join([
-            f"• {a['title']}\n  {a['description']}\n  Fuente: {a['source']} | {a['url']} | {a['publishedAt'][:10]}"
-            for a in articles
-        ])
+    covered = memory.get("covered_topics", [])[-20:]
+    covered_text = "\n".join(f"- {t}" for t in covered) if covered else "Ninguno aún (primera semana)"
+
+    articles_text = "\n\n".join([
+        f"• {a['title']}\n  {a['description']}\n  Fuente: {a['source']} | {a['url']} | {a.get('publishedAt','')[:10]}"
+        for a in articles
+    ])
 
     today = datetime.now().strftime("%d de %B de %Y")
     user_prompt = f"""Fecha: {today}
 
-=== NOTICIAS WORLDWIDE (inglés) ===
-{fmt(global_articles)}
+TEMAS YA CUBIERTOS EN SEMANAS ANTERIORES (no repetir):
+{covered_text}
 
-=== NOTICIAS DE ESPAÑA (priorizar) ===
-{fmt(es_articles)}
+NOTICIAS DE ESTA SEMANA:
+{articles_text if articles_text else "No se encontraron noticias nuevas — genera el briefing con tendencias generales del sector."}
 
-Genera el reporte semanal completo con los 2 posts de LinkedIn. Solo JSON."""
+Genera el reporte semanal completo. Solo JSON."""
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
@@ -255,19 +335,28 @@ C_TEXT       = "#2d2d2d"
 C_TEXT_LIGHT = "#7a6f6a"
 C_BORDER     = "#e8e0d8"
 C_TAG_BG     = "#f5ede8"
-C_GREEN_BG   = "#f0f7f2"
-C_GREEN      = "#5a8a6a"
+
+CAT_COLORS = {
+    "TENDENCIAS":    "#b5725a",
+    "CAMPAÑAS":      "#9b6e8a",
+    "COLABORACIONES":"#7a8fa6",
+    "BELLEZA":       "#c17f5e",
+    "FRAGANCIAS":    "#9b8ab5",
+    "MAQUILLAJE":    "#b5728a",
+    "MODA & BEAUTY": "#7a9b8a",
+    "COMPETENCIA":   "#8a8a8a",
+}
 
 def spain_badge() -> str:
-    return f'<span style="background:#f0e8f5;color:#8a6a9b;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:8px;letter-spacing:0.1em;">🇪🇸 España</span>'
+    return '<span style="background:#f0e8f5;color:#8a6a9b;font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;margin-left:8px;letter-spacing:0.1em;">🇪🇸 España</span>'
 
 def section_header(title: str, emoji: str, color: str = None) -> str:
     c = color or C_ACCENT
-    return f"""<div style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:{c};border-bottom:2px solid {c};padding-bottom:8px;margin-bottom:16px;">{emoji} {title}</div>"""
+    return f'<div style="font-size:11px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:{c};border-bottom:2px solid {c};padding-bottom:8px;margin-bottom:16px;">{emoji} {title}</div>'
 
 def news_card(item: dict, show_marca: bool = False) -> str:
-    es = item.get("es_españa", False)
-    url = item.get("url", "")
+    es    = item.get("es_españa", False)
+    url   = item.get("url", "")
     titulo = item.get("titulo", item.get("title", ""))
     titulo_html = f'<a href="{url}" style="color:{C_TEXT};text-decoration:none;">{titulo}</a>' if url else titulo
     marca = item.get("marca", item.get("casa", ""))
@@ -275,28 +364,28 @@ def news_card(item: dict, show_marca: bool = False) -> str:
     return f"""<div style="background:{C_WHITE};border:1px solid {C_BORDER};border-radius:10px;padding:16px 20px;margin-bottom:10px;">
       {f'<div style="font-size:11px;font-weight:700;color:{C_ACCENT};letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">{marca}{spain_badge() if es else ""}</div>' if show_marca and marca else (spain_badge() if es else "")}
       <div style="font-size:15px;font-weight:600;color:{C_TEXT};line-height:1.35;margin-bottom:8px;">{titulo_html}</div>
-      <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;">{item.get('descripcion', '')}</div>
-      <div style="font-size:11px;color:#ccc;margin-top:8px;font-style:italic;">{item.get('fuente', '')}</div>
+      <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;">{item.get('descripcion','')}</div>
+      <div style="font-size:11px;color:#ccc;margin-top:8px;font-style:italic;">{item.get('fuente','')}</div>
     </div>"""
 
 def trend_card(item: dict) -> str:
     es = item.get("es_españa", False)
     return f"""<div style="background:{C_TAG_BG};border-radius:10px;padding:16px 20px;margin-bottom:10px;border-left:3px solid {C_ACCENT};">
-      <div style="font-size:15px;font-weight:600;color:{C_TEXT};margin-bottom:8px;">{item.get('titulo', '')}{spain_badge() if es else ''}</div>
-      <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;">{item.get('descripcion', '')}</div>
+      <div style="font-size:15px;font-weight:600;color:{C_TEXT};margin-bottom:8px;">{item.get('titulo','')}{spain_badge() if es else ''}</div>
+      <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;">{item.get('descripcion','')}</div>
     </div>"""
 
 def linkedin_card(post_data: dict, num: int) -> str:
     post = post_data.get("post", "").replace("\n", "<br>")
     basado = post_data.get("basado_en", "")
     return f"""<div style="background:{C_WHITE};border:1px solid {C_BORDER};border-radius:10px;padding:20px;margin-bottom:12px;">
-      <div style="display:flex;align-items:center;margin-bottom:12px;">
-        <div style="background:{C_ACCENT};color:#fff;font-size:11px;font-weight:700;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin-right:10px;text-align:center;line-height:24px;">{num}</div>
-        <div style="font-size:11px;color:{C_TEXT_LIGHT};font-style:italic;">Inspirado en: {basado}</div>
+      <div style="margin-bottom:12px;">
+        <span style="background:{C_ACCENT};color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-right:8px;">Post {num}</span>
+        <span style="font-size:11px;color:{C_TEXT_LIGHT};font-style:italic;">Basado en: {basado}</span>
       </div>
       <div style="background:{C_TAG_BG};border-radius:8px;padding:16px;font-size:13px;color:{C_TEXT};line-height:1.75;">{post}</div>
-      <div style="margin-top:10px;text-align:right;">
-        <a href="https://www.linkedin.com/post/new/" style="background:{C_ACCENT};color:#fff;font-size:11px;font-weight:600;padding:6px 14px;border-radius:20px;text-decoration:none;letter-spacing:0.05em;">Publicar en LinkedIn →</a>
+      <div style="margin-top:12px;text-align:right;">
+        <a href="https://www.linkedin.com/feed/" style="background:{C_ACCENT};color:#fff;font-size:11px;font-weight:600;padding:7px 16px;border-radius:20px;text-decoration:none;">Publicar en LinkedIn →</a>
       </div>
     </div>"""
 
@@ -305,7 +394,6 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     fecha = data.get("semana", datetime.now().strftime("%d de %B de %Y"))
     frase = data.get("frase_semana", "")
 
-    # Tendencias
     tendencias_html = "".join([trend_card(t) for t in data.get("tendencias", [])])
     tendencias_section = f"""
     <tr><td style="background:{C_WHITE};padding:24px 28px 8px;">
@@ -313,7 +401,6 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       {tendencias_html}
     </td></tr>""" if tendencias_html else ""
 
-    # Novedades
     novedades_html = "".join([news_card(n, show_marca=True) for n in data.get("novedades", [])])
     novedades_section = f"""
     <tr><td style="background:{C_WHITE};padding:16px 28px 8px;">
@@ -321,7 +408,6 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       {novedades_html}
     </td></tr>""" if novedades_html else ""
 
-    # Noticias casas de lujo
     casas_html = "".join([news_card(n, show_marca=True) for n in data.get("noticias_casas_lujo", [])])
     casas_section = f"""
     <tr><td style="background:{C_WHITE};padding:16px 28px 8px;">
@@ -329,7 +415,6 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       {casas_html}
     </td></tr>""" if casas_html else ""
 
-    # YSL y competencia
     comp_html = "".join([news_card(n, show_marca=True) for n in data.get("ysl_y_competencia", [])])
     comp_section = f"""
     <tr><td style="background:{C_WHITE};padding:16px 28px 8px;">
@@ -337,7 +422,48 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       {comp_html}
     </td></tr>""" if comp_html else ""
 
-    # Posts LinkedIn
+    # Digital y social
+    digital = data.get("digital_social", {})
+    campanas_html = ""
+    for c in digital.get("campanas_destacadas", []):
+        es = c.get("es_españa", False)
+        campanas_html += f"""<div style="background:{C_WHITE};border:1px solid {C_BORDER};border-radius:10px;padding:14px 18px;margin-bottom:10px;">
+          <div style="font-size:11px;font-weight:700;color:#7a8fa6;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px;">{c.get('marca','')} · {c.get('plataforma','')}{spain_badge() if es else ''}</div>
+          <div style="font-size:14px;font-weight:600;color:{C_TEXT};margin-bottom:6px;">{c.get('titulo','')}</div>
+          <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.65;">{c.get('descripcion','')}</div>
+        </div>"""
+
+    digital_section = f"""
+    <tr><td style="background:{C_WHITE};padding:16px 28px 8px;">
+      {section_header("Digital & Social Media", "📱", "#7a8fa6")}
+      <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;margin-bottom:14px;">{digital.get('resumen','')}</div>
+      {campanas_html}
+      {f'<div style="background:#f0f4f8;border-left:3px solid #7a8fa6;border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:10px;"><div style="font-size:10px;font-weight:700;color:#7a8fa6;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:6px;">Radar competencia</div><div style="font-size:13px;color:{C_TEXT};line-height:1.65;">{digital.get("radar_competencia","")}</div></div>' if digital.get("radar_competencia") else ""}
+      {f'<div style="background:{C_TAG_BG};border-left:3px solid {C_ACCENT};border-radius:0 8px 8px 0;padding:12px 16px;"><div style="font-size:10px;font-weight:700;color:{C_ACCENT};letter-spacing:0.15em;text-transform:uppercase;margin-bottom:6px;">Tendencia emergente</div><div style="font-size:13px;color:{C_TEXT};line-height:1.65;">{digital.get("tendencia_emergente","")}</div></div>' if digital.get("tendencia_emergente") else ""}
+    </td></tr>""" if digital else ""
+
+    # El Rincón
+    rincon = data.get("el_rincon", {})
+    rincon_items_html = ""
+    for item in rincon.get("items", []):
+        url = item.get("url", "")
+        titulo = item.get("titulo", "")
+        titulo_html = f'<a href="{url}" style="color:{C_TEXT};text-decoration:none;">{titulo}</a>' if url else titulo
+        rincon_items_html += f"""<div style="background:#f8f6ff;border:1px solid #e0daf0;border-radius:10px;padding:14px 18px;margin-bottom:10px;">
+          <div style="font-size:11px;font-weight:700;color:#8a7ab5;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px;">{item.get('marca','')}</div>
+          <div style="font-size:14px;font-weight:600;color:{C_TEXT};margin-bottom:6px;">{titulo_html}</div>
+          <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.65;">{item.get('descripcion','')}</div>
+          <div style="font-size:11px;color:#ccc;margin-top:6px;font-style:italic;">{item.get('fuente','')}</div>
+        </div>"""
+
+    rincon_section = f"""
+    <tr><td style="background:{C_WHITE};padding:16px 28px 8px;">
+      {section_header(rincon.get('titulo', 'El Rincón'), "🪒", "#8a7ab5")}
+      <div style="font-size:13px;color:{C_TEXT_LIGHT};font-style:italic;margin-bottom:14px;">{rincon.get('intro','')}</div>
+      {rincon_items_html}
+    </td></tr>""" if rincon else ""
+
+    # LinkedIn
     linkedin_posts = data.get("posts_linkedin", [])
     linkedin_cards = "".join([linkedin_card(p, i+1) for i, p in enumerate(linkedin_posts)])
     linkedin_section = f"""
@@ -365,17 +491,20 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       {f'<div style="font-size:13px;color:{C_ACCENT};margin-top:10px;font-style:italic;">{frase}</div>' if frase else ''}
     </td></tr>
 
-    <tr><td style="background:{C_WHITE};padding:18px 28px 8px;">
-<div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.75;">Hola {recipient_name} 💛 Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>    </td></tr>
+    <tr><td style="background:{C_WHITE};padding:20px 28px 16px;">
+      <div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.75;">Hola {recipient_name} 💛 Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>
+    </td></tr>
 
     {tendencias_section}
     {novedades_section}
     {casas_section}
     {comp_section}
+    {digital_section}
+    {rincon_section}
     {linkedin_section}
 
     <tr><td style="background:{C_WHITE};border-radius:0 0 12px 12px;padding:16px 28px 24px;">
-      <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal · {fecha} · Generado por el unico e inigualable Jose Manuel Huertas</div>
+      <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal · {fecha} · Generado por el mago de Jose Manuel Huertas</div>
     </td></tr>
 
   </table>
@@ -393,7 +522,7 @@ def send_email(html_body: str, subject: str):
     msg["Subject"] = subject
     msg["From"]    = f"Beauty Briefing <{GMAIL_USER}>"
     msg["To"]      = RECIPIENT_EMAIL
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    msg.attach(MIMEText(html_body, "utf-8"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
@@ -408,11 +537,17 @@ def main():
     log.info(f"TEST_MODE: {TEST_MODE}")
     log.info("=" * 55)
 
-    global_articles, es_articles = fetch_news()
-    briefing     = generate_briefing(global_articles, es_articles)
+    memory   = load_memory()
+    articles = fetch_news(memory)
+    briefing = generate_briefing(articles, memory)
+
+    # Actualizar memoria con lo cubierto esta semana
+    update_memory(memory, briefing)
+    save_memory(memory)
+
     fecha_bonita = datetime.now().strftime("%d de %B de %Y")
-    subject      = f"✨ Tu beauty briefing · {fecha_bonita}"
-    html         = render_email_html(briefing, RECIPIENT_NAME)
+    subject = f"✨ Tu beauty briefing · {fecha_bonita}"
+    html    = render_email_html(briefing, RECIPIENT_NAME)
 
     if TEST_MODE:
         log.info("TEST MODE — email no enviado. Briefing generado:")
