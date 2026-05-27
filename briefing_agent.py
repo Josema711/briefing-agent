@@ -15,7 +15,8 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 
@@ -140,18 +141,19 @@ Asegúrate de que todas las noticias sean reales, verificadas y de los últimos 
 def generate_briefing() -> dict:
     log.info("Generando briefing con Gemini + Google Search...")
 
-    genai.configure(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=SYSTEM_PROMPT,
-        tools="google_search_retrieval",
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=build_user_prompt(),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.7,
+        ),
     )
 
-    prompt = build_user_prompt()
-    response = model.generate_content(prompt)
     text_content = response.text
-
     if not text_content.strip():
         raise ValueError("Gemini no devolvió contenido de texto")
 
