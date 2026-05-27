@@ -2,17 +2,20 @@
 """
 YSL Beauty Intelligence Briefing Agent
 ---------------------------------------
-Usa Anthropic Claude API con búsqueda web integrada.
-Lee credenciales desde variables de entorno (GitHub Secrets en producción).
+100% gratuito:
+- NewsAPI para buscar noticias reales
+- Groq (llama) para analizar y redactar el briefing
+- Gmail SMTP para enviar el email
 """
 
-import anthropic
 import smtplib
 import json
 import os
 import logging
 import sys
-from datetime import datetime
+import urllib.request
+import urllib.parse
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -33,128 +36,166 @@ log = logging.getLogger(__name__)
 def get_env(key: str) -> str:
     val = os.environ.get(key, "").strip()
     if not val:
-        raise EnvironmentError(f"Variable de entorno '{key}' no definida. Revisa los GitHub Secrets.")
+        raise EnvironmentError(f"Variable '{key}' no definida. Revisa los GitHub Secrets.")
     return val
 
-ANTHROPIC_API_KEY  = get_env("ANTHROPIC_API_KEY")
+GROQ_API_KEY       = get_env("GROQ_API_KEY")
+NEWS_API_KEY       = get_env("NEWS_API_KEY")
 GMAIL_USER         = get_env("GMAIL_USER")
 GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
 RECIPIENT_NAME     = get_env("RECIPIENT_NAME")
 TEST_MODE          = os.environ.get("TEST_MODE", "false").lower() == "true"
 
-# ─── Prompts ────────────────────────────────────────────────────────────────
+# ─── Buscar noticias con NewsAPI ─────────────────────────────────────────────
 
-SYSTEM_PROMPT = """Eres un agente de inteligencia estratégica de marketing de lujo, especializado en YSL Beauty y el universo L'Oréal Luxe.
+SEARCH_QUERIES = [
+    "YSL Beauty fragrance makeup",
+    "luxury beauty collaboration campaign",
+    "Dior Chanel beauty launch",
+    "L'Oreal luxury beauty marketing",
+    "Tom Ford Givenchy Armani beauty",
+    "luxury beauty TikTok influencer",
+    "perfume fragrance launch 2025",
+    "beauty marketing strategy luxury",
+]
 
-Tu destinataria es una Brand Manager de YSL Beauty que trabaja tanto en perfumería/fragancias como en maquillaje/cosmética. Necesita este briefing para:
-- Estar al día de todo lo relevante en su industria
-- Encontrar inspiración y referencias para su trabajo diario
-- Tener contenido y ángulos interesantes para compartir en LinkedIn
-- Anticipar movimientos del mercado y de la competencia
+def fetch_news() -> list[dict]:
+    log.info("Buscando noticias con NewsAPI...")
+    all_articles = []
+    seen_urls = set()
 
-Usas búsqueda web para encontrar noticias REALES y recientes de los últimos 7 días. Nunca inventes noticias.
+    date_from = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+    for query in SEARCH_QUERIES:
+        params = urllib.parse.urlencode({
+            "q": query,
+            "from": date_from,
+            "sortBy": "relevancy",
+            "language": "en",
+            "pageSize": 5,
+            "apiKey": NEWS_API_KEY,
+        })
+        url = f"https://newsapi.org/v2/everything?{params}"
+
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                for art in data.get("articles", []):
+                    u = art.get("url", "")
+                    if u and u not in seen_urls and art.get("title") and "[Removed]" not in art.get("title", ""):
+                        seen_urls.add(u)
+                        all_articles.append({
+                            "title":       art.get("title", ""),
+                            "description": art.get("description", "") or "",
+                            "source":      art.get("source", {}).get("name", ""),
+                            "url":         u,
+                            "publishedAt": art.get("publishedAt", ""),
+                        })
+        except Exception as e:
+            log.warning(f"Error buscando '{query}': {e}")
+            continue
+
+    log.info(f"Noticias encontradas: {len(all_articles)}")
+    return all_articles[:40]  # Máximo 40 para no exceder tokens
+
+
+# ─── Analizar y redactar con Groq ────────────────────────────────────────────
+
+SYSTEM_PROMPT = """Eres un agente de inteligencia estratégica de marketing de lujo, especializado en YSL Beauty y L'Oréal Luxe.
+
+Tu destinataria es una Brand Manager de YSL Beauty (fragancias y maquillaje) que necesita este briefing para:
+- Estar al día de su industria
+- Inspiración para su trabajo diario
+- Contenido para compartir en LinkedIn
+- Anticipar movimientos del mercado y competencia
+
+A partir de las noticias reales que te doy, genera un briefing semanal completo.
 
 Responde ÚNICAMENTE con un objeto JSON válido, sin markdown, sin texto adicional, sin backticks.
 
 Estructura exacta:
 {
   "semana": "DD MMM YYYY",
-  "insight_semana": "Una observación estratégica profunda sobre el momento actual del sector lujo-belleza. No un titular, sino una lectura del mercado que una experta valoraría (máx 35 palabras)",
-  "estado_del_mercado": "Párrafo breve (3-4 frases) con el pulso general del sector esta semana: qué está pasando a nivel macro, qué conversación domina la industria, qué tensiones o oportunidades emergen",
+  "insight_semana": "Observación estratégica profunda del momento actual del sector (máx 35 palabras)",
+  "estado_del_mercado": "Pulso general del sector esta semana basado en las noticias (3-4 frases)",
   "articulos": [
     {
       "categoria": "COLABORACIONES | TENDENCIAS | CAMPAÑAS | COMPETENCIA | INFLUENCERS | RETAIL & DIGITAL | FRAGANCIAS | MAQUILLAJE",
-      "titulo": "Título claro y descriptivo de la noticia",
-      "que_paso": "Descripción factual de lo ocurrido (2-3 frases). Solo hechos.",
-      "por_que_importa": "Análisis estratégico: qué significa esto para el sector, qué patrón revela, qué implica a medio plazo (2-3 frases)",
-      "angulo_ysl": "Cómo afecta o debería afectar específicamente a YSL Beauty o L'Oréal Luxe. Qué puede aprender o hacer al respecto (1-2 frases)",
-      "linkedin_hook": "Una frase provocadora o insight que podría usar para abrir un post de LinkedIn sobre esta noticia",
+      "titulo": "Título claro de la noticia",
+      "que_paso": "Qué ocurrió exactamente (2-3 frases, solo hechos)",
+      "por_que_importa": "Análisis estratégico: qué significa para el sector (2-3 frases)",
+      "angulo_ysl": "Cómo afecta a YSL Beauty específicamente (1-2 frases)",
+      "linkedin_hook": "Primera frase provocadora para un post de LinkedIn sobre esto",
       "fuente": "Nombre del medio",
-      "url": "URL si está disponible, si no cadena vacía"
+      "url": "URL de la noticia"
     }
   ],
   "competencia_radar": {
-    "resumen": "Qué están haciendo esta semana los competidores clave (Dior Beauty, Chanel, Givenchy, Tom Ford, Armani Beauty, Lancôme). Movimientos destacados (3-4 frases)",
-    "amenaza_oportunidad": "El movimiento competitivo más relevante de la semana y qué respuesta o inspiración sugiere para YSL"
+    "resumen": "Movimientos de Dior, Chanel, Givenchy, Tom Ford, Armani, Lancôme esta semana (3-4 frases)",
+    "amenaza_oportunidad": "El movimiento competitivo más relevante y qué sugiere para YSL"
   },
   "tendencia_emergente": {
     "nombre": "Nombre corto de la tendencia",
-    "descripcion": "Qué es, de dónde viene, por qué está ganando fuerza ahora (3-4 frases)",
-    "relevancia_practica": "Cómo podría materializarse esta tendencia en campañas, producto o comunicación para YSL Beauty"
+    "descripcion": "Qué es y por qué gana fuerza ahora (3-4 frases)",
+    "relevancia_practica": "Cómo podría aplicarse en YSL Beauty"
   },
-  "digital_social": "Qué está pasando esta semana en TikTok, Instagram y LinkedIn en el espacio beauty-lujo: formatos que funcionan, creadores que despuntan, conversaciones que dominan (3-4 frases)",
-  "accion_sugerida": "Una acción concreta, específica y accionable esta semana. No genérica — algo real que una Brand Manager de YSL podría hacer o proponer en su equipo basándose en las noticias de esta semana",
+  "digital_social": "Qué está pasando en TikTok, Instagram y LinkedIn en beauty-lujo esta semana (3-4 frases)",
+  "accion_sugerida": "Acción concreta y accionable para esta semana para una Brand Manager de YSL",
   "para_linkedin": {
-    "tema": "El tema de la semana más potente para compartir en LinkedIn desde una perspectiva experta",
-    "angulo": "El ángulo o punto de vista que haría destacar el post (no el obvio, sino el interesante)",
-    "opening_line": "Primera línea del post lista para usar — que enganche y genere curiosidad"
+    "tema": "Tema más potente para LinkedIn esta semana",
+    "angulo": "Ángulo interesante, no el obvio",
+    "opening_line": "Primera línea del post lista para usar"
   },
-  "frase_inspiracion": "Cita o frase relacionada con creatividad, belleza, lujo o estrategia. Puede ser de un creativo, diseñador, directivo del sector o pensador relevante"
+  "frase_inspiracion": "Cita de un creativo, diseñador o directivo del sector belleza-lujo"
 }
 
-Incluye entre 6 y 8 artículos, equilibrados entre fragancias y maquillaje, y entre los distintos competidores. Prioriza siempre noticias reales de los últimos 7 días."""
+Selecciona entre 6 y 8 noticias de las que te doy, las más relevantes para YSL Beauty. Usa solo noticias del listado proporcionado."""
 
 
-def build_user_prompt() -> str:
+def generate_briefing(articles: list[dict]) -> dict:
+    log.info("Generando briefing con Groq...")
+
+    articles_text = "\n\n".join([
+        f"- Título: {a['title']}\n  Descripción: {a['description']}\n  Fuente: {a['source']}\n  URL: {a['url']}\n  Fecha: {a['publishedAt']}"
+        for a in articles
+    ])
+
     today = datetime.now().strftime("%A %d de %B de %Y")
-    return f"""Genera el briefing semanal de inteligencia para una Brand Manager de YSL Beauty en L'Oréal Luxe.
-Fecha de hoy: {today}.
+    user_prompt = f"""Fecha de hoy: {today}
 
-Busca noticias reales de los últimos 7 días en estas áreas:
+Aquí tienes las noticias de los últimos 7 días relacionadas con el sector beauty de lujo. Genera el briefing semanal para la Brand Manager de YSL Beauty:
 
-FRAGANCIAS & PERFUMERÍA:
-- Lanzamientos de fragancias de lujo (YSL, Dior, Chanel, Givenchy, Tom Ford, Maison Margiela, Armani)
-- Colaboraciones de perfumería con artistas, celebrities o marcas de moda
-- Tendencias olfativas emergentes y movimientos en el mercado de nicho
-- Campañas de comunicación de fragancias destacadas
-- Innovaciones en packaging, retail experience o storytelling de fragancia
+{articles_text}
 
-MAQUILLAJE & COSMÉTICA DE LUJO:
-- Lanzamientos de maquillaje de lujo y campañas asociadas
-- Movimientos de YSL Beauté (Rouge Sur Mesure, Libre, Black Opium, cualquier novedad)
-- Tendencias de maquillaje que están ganando tracción en redes sociales
-- Colaboraciones beauty con artistas, diseñadores o influencers de lujo
-- Innovaciones en fórmulas, tecnología beauty o experiencia de compra
+Recuerda: usa SOLO las noticias del listado, selecciona las más relevantes para YSL Beauty y responde únicamente con el JSON."""
 
-MARKETING & ESTRATEGIA:
-- Campañas de marketing de lujo especialmente creativas o disruptivas
-- Movimientos estratégicos de Dior Beauty, Chanel Beauty, Givenchy Beauty, Tom Ford Beauty, Armani Beauty, Lancôme
-- Ambassador deals y fichajes de embajadores en el sector lujo
-- Estrategias digitales y de redes sociales de marcas de lujo
-- Noticias de L'Oréal Group relevantes para el segmento de lujo
+    payload = json.dumps({
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user",   "content": user_prompt},
+        ],
+        "temperature": 0.7,
+        "max_tokens":  4096,
+    }).encode("utf-8")
 
-DIGITAL & CULTURA:
-- Tendencias en TikTok e Instagram relacionadas con beauty de lujo
-- Creadores de contenido beauty de lujo que están despuntando
-- Colaboraciones entre moda y belleza de lujo
-- Momentos culturales (alfombras rojas, fashion weeks, eventos) con relevancia beauty
-- Conversaciones en LinkedIn sobre marketing de lujo y belleza
-
-Asegúrate de que todas las noticias sean reales, verificadas y de los últimos 7 días."""
-
-
-# ─── Generar briefing con Claude + web search ────────────────────────────────
-
-def generate_briefing() -> dict:
-    log.info("Generando briefing con Claude + web search...")
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-    response = client.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": build_user_prompt()}],
+    req = urllib.request.Request(
+        "https://api.groq.com/openai/v1/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type":  "application/json",
+        },
     )
 
-    text_content = ""
-    for block in response.content:
-        if block.type == "text":
-            text_content += block.text
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read().decode())
+
+    text_content = data["choices"][0]["message"]["content"]
 
     if not text_content.strip():
-        raise ValueError("Claude no devolvió contenido de texto")
+        raise ValueError("Groq no devolvió contenido")
 
     clean = text_content.replace("```json", "").replace("```", "").strip()
     briefing = json.loads(clean)
@@ -200,27 +241,17 @@ def render_email_html(data: dict, recipient_name: str) -> str:
 
         articulos_html += f"""
         <div style="border:1px solid #e8e0d4;border-radius:8px;padding:18px 22px;margin-bottom:14px;background:#fff;">
-          <div style="font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:{color};font-weight:600;margin-bottom:8px;">
-            {icon} {cat}
-          </div>
-          <div style="font-family:'Georgia',serif;font-size:17px;font-weight:400;color:#1a1a1a;line-height:1.3;margin-bottom:10px;">
-            {titulo_html}
-          </div>
+          <div style="font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:{color};font-weight:600;margin-bottom:8px;">{icon} {cat}</div>
+          <div style="font-family:'Georgia',serif;font-size:17px;font-weight:400;color:#1a1a1a;line-height:1.3;margin-bottom:10px;">{titulo_html}</div>
           <div style="font-size:13px;color:#333;line-height:1.7;margin-bottom:6px;">
-            <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Qué pasó</strong><br>
-            {art.get('que_paso', '')}
+            <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Qué pasó</strong><br>{art.get('que_paso', '')}
           </div>
           <div style="font-size:13px;color:#444;line-height:1.7;margin-bottom:6px;margin-top:10px;">
-            <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Por qué importa</strong><br>
-            {art.get('por_que_importa', '')}
+            <strong style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#999;">Por qué importa</strong><br>{art.get('por_que_importa', '')}
           </div>
-          <div style="font-size:12.5px;color:{color};line-height:1.6;margin-top:10px;font-style:italic;">
-            ✦ <strong>Ángulo YSL:</strong> {art.get('angulo_ysl', '')}
-          </div>
+          <div style="font-size:12.5px;color:{color};line-height:1.6;margin-top:10px;font-style:italic;">✦ <strong>Ángulo YSL:</strong> {art.get('angulo_ysl', '')}</div>
           {f'<div style="background:#faf7f2;border-left:3px solid #c9a84c;padding:10px 14px;margin-top:10px;border-radius:0 6px 6px 0;font-size:12px;color:#5a4a1a;font-style:italic;">💼 <strong>LinkedIn hook:</strong> {linkedin_hook}</div>' if linkedin_hook else ''}
-          <div style="font-size:11px;color:#bbb;margin-top:10px;">
-            {art.get('fuente', '')}
-          </div>
+          <div style="font-size:11px;color:#bbb;margin-top:10px;">{art.get('fuente', '')}</div>
         </div>"""
 
     competencia = data.get("competencia_radar", {})
@@ -229,9 +260,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       <div style="height:0.5px;background:#e8e0d4;margin-bottom:20px;"></div>
       <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#4a9eca;margin-bottom:12px;">👁️ Radar competencia</div>
       <div style="font-size:13px;color:#333;line-height:1.7;margin-bottom:10px;">{competencia.get('resumen', '')}</div>
-      <div style="background:#f0f6ff;border-left:3px solid #4a9eca;padding:12px 16px;border-radius:0 6px 6px 0;font-size:12.5px;color:#1a3a5c;font-style:italic;">
-        ⚡ {competencia.get('amenaza_oportunidad', '')}
-      </div>
+      <div style="background:#f0f6ff;border-left:3px solid #4a9eca;padding:12px 16px;border-radius:0 6px 6px 0;font-size:12.5px;color:#1a3a5c;font-style:italic;">⚡ {competencia.get('amenaza_oportunidad', '')}</div>
     </td></tr>""" if competencia else ""
 
     tendencia = data.get("tendencia_emergente", {})
@@ -258,9 +287,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       <div style="font-size:10px;letter-spacing:0.3em;text-transform:uppercase;color:#c9a84c;margin-bottom:12px;">💼 Para tu LinkedIn esta semana</div>
       <div style="font-size:13px;color:#333;margin-bottom:6px;"><strong>Tema:</strong> {linkedin.get('tema', '')}</div>
       <div style="font-size:13px;color:#555;margin-bottom:12px;"><strong>Ángulo:</strong> {linkedin.get('angulo', '')}</div>
-      <div style="background:#fff;border:1px solid #e8e0d4;border-radius:8px;padding:14px 18px;font-family:'Georgia',serif;font-size:15px;color:#1a1a1a;font-style:italic;line-height:1.5;">
-        "{linkedin.get('opening_line', '')}"
-      </div>
+      <div style="background:#fff;border:1px solid #e8e0d4;border-radius:8px;padding:14px 18px;font-family:'Georgia',serif;font-size:15px;color:#1a1a1a;font-style:italic;line-height:1.5;">"{linkedin.get('opening_line', '')}"</div>
     </td></tr>""" if linkedin else ""
 
     frase = data.get("frase_inspiracion", "")
@@ -276,11 +303,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
 
     return f"""<!DOCTYPE html>
 <html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>YSL Intelligence Briefing</title>
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YSL Intelligence Briefing</title></head>
 <body style="margin:0;padding:0;background:#f5f0ea;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f0ea;padding:32px 0;">
   <tr><td align="center">
@@ -320,13 +343,12 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     {frase_html}
     <tr><td style="background:#1a1a1a;padding:20px 36px;border-radius:0 0 10px 10px;">
       <div style="font-size:10px;color:#666;text-align:center;letter-spacing:0.1em;">YSL BEAUTY INTELLIGENCE · GENERADO CON IA · {fecha}</div>
-      <div style="font-size:10px;color:#444;text-align:center;margin-top:4px;">Powered by Claude + Anthropic Web Search</div>
+      <div style="font-size:10px;color:#444;text-align:center;margin-top:4px;">Powered by Groq + NewsAPI · 100% gratuito</div>
     </td></tr>
   </table>
   </td></tr>
 </table>
-</body>
-</html>"""
+</body></html>"""
 
 
 # ─── Enviar email ────────────────────────────────────────────────────────────
@@ -338,7 +360,6 @@ def send_email(html_body: str, subject: str):
     msg["From"]    = f"YSL Intelligence <{GMAIL_USER}>"
     msg["To"]      = RECIPIENT_EMAIL
     msg.attach(MIMEText(html_body, "html", "utf-8"))
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
@@ -353,7 +374,8 @@ def main():
     log.info(f"TEST_MODE: {TEST_MODE}")
     log.info("=" * 55)
 
-    briefing     = generate_briefing()
+    articles     = fetch_news()
+    briefing     = generate_briefing(articles)
     fecha_bonita = datetime.now().strftime("%d %b %Y")
     subject      = f"✦ YSL Intelligence Briefing · {fecha_bonita}"
     html         = render_email_html(briefing, RECIPIENT_NAME)
