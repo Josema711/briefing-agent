@@ -366,7 +366,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     </td></tr>
 
     <tr><td style="background:{C_WHITE};padding:18px 28px 8px;">
-<div style="font-size:13.5px;color:{C_TEXT};line-height:1.75;">Hola {recipient_name} 💛<br><br>Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>    </td></tr>
+<div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.75;">Hola {recipient_name} 💛 Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>    </td></tr>
 
     {tendencias_section}
     {novedades_section}
@@ -375,7 +375,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     {linkedin_section}
 
     <tr><td style="background:{C_WHITE};border-radius:0 0 12px 12px;padding:16px 28px 24px;">
-      <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal · {fecha} · Generado con IA</div>
+      <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal · {fecha} · Generado por el unico e inigualable Jose Manuel Huertas</div>
     </td></tr>
 
   </table>
