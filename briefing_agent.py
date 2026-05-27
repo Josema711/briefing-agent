@@ -2,10 +2,11 @@
 """
 YSL Beauty Intelligence Briefing Agent
 ---------------------------------------
-Usa Google Gemini API (gratuito) con búsqueda web integrada.
+Usa Anthropic Claude API con búsqueda web integrada.
 Lee credenciales desde variables de entorno (GitHub Secrets en producción).
 """
 
+import anthropic
 import smtplib
 import json
 import os
@@ -14,9 +15,6 @@ import sys
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
-from google import genai
-from google.genai import types
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 
@@ -38,7 +36,7 @@ def get_env(key: str) -> str:
         raise EnvironmentError(f"Variable de entorno '{key}' no definida. Revisa los GitHub Secrets.")
     return val
 
-GEMINI_API_KEY     = get_env("GEMINI_API_KEY")
+ANTHROPIC_API_KEY  = get_env("ANTHROPIC_API_KEY")
 GMAIL_USER         = get_env("GMAIL_USER")
 GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
@@ -136,26 +134,27 @@ DIGITAL & CULTURA:
 Asegúrate de que todas las noticias sean reales, verificadas y de los últimos 7 días."""
 
 
-# ─── Generar briefing con Gemini + Google Search ─────────────────────────────
+# ─── Generar briefing con Claude + web search ────────────────────────────────
 
 def generate_briefing() -> dict:
-    log.info("Generando briefing con Gemini + Google Search...")
+    log.info("Generando briefing con Claude + web search...")
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=build_user_prompt(),
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            temperature=0.7,
-        ),
+    response = client.messages.create(
+        model="claude-opus-4-5",
+        max_tokens=4096,
+        system=SYSTEM_PROMPT,
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        messages=[{"role": "user", "content": build_user_prompt()}],
     )
 
-    text_content = response.text
+    text_content = ""
+    for block in response.content:
+        if block.type == "text":
+            text_content += block.text
+
     if not text_content.strip():
-        raise ValueError("Gemini no devolvió contenido de texto")
+        raise ValueError("Claude no devolvió contenido de texto")
 
     clean = text_content.replace("```json", "").replace("```", "").strip()
     briefing = json.loads(clean)
@@ -321,7 +320,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     {frase_html}
     <tr><td style="background:#1a1a1a;padding:20px 36px;border-radius:0 0 10px 10px;">
       <div style="font-size:10px;color:#666;text-align:center;letter-spacing:0.1em;">YSL BEAUTY INTELLIGENCE · GENERADO CON IA · {fecha}</div>
-      <div style="font-size:10px;color:#444;text-align:center;margin-top:4px;">Powered by Gemini + Google Search</div>
+      <div style="font-size:10px;color:#444;text-align:center;margin-top:4px;">Powered by Claude + Anthropic Web Search</div>
     </td></tr>
   </table>
   </td></tr>
