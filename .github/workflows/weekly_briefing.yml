@@ -1,0 +1,55 @@
+name: YSL Beauty Intelligence Briefing
+
+on:
+  schedule:
+    # Cada domingo a las 9:00 AM hora de Madrid (UTC+2 en verano → 07:00 UTC)
+    # En invierno (UTC+1) cambiar a: '0 8 * * 0'
+    - cron: '0 7 * * 0'
+
+  # Permite ejecutarlo manualmente desde GitHub → Actions → Run workflow
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test mode (no envía email, solo imprime el briefing)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  send-briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Run briefing agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          RECIPIENT_NAME: ${{ secrets.RECIPIENT_NAME }}
+          TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
+        run: python briefing_agent.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefing-error-logs-${{ github.run_id }}
+          path: briefing_agent.log
+          retention-days: 30
