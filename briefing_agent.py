@@ -234,7 +234,7 @@ REGLAS:
 - Tono: elegante, ejecutivo, moderno, insider luxury. Como Vogue Business o Business of Fashion.
 
 POSTS LINKEDIN:
-- Sonar humanos, punto de vista propio, evitar cliches, parecer escritos por joven profesional luxury beauty.
+- Sonar humanos, punto de vista propio y completo, evitar cliches, parecer escritos por joven profesional luxury beauty.
 
 Responde UNICAMENTE con JSON valido. Sin markdown. Sin backticks.
 
@@ -439,7 +439,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     {f'<div style="font-size:13px;color:{C_ACCENT};margin-top:10px;font-style:italic;">{frase}</div>' if frase else ""}
   </td></tr>
   <tr><td style="background:{C_WHITE};padding:20px 28px 16px;">
-    <div style="font-size:13.5px;color:{C_TEXT};line-height:1.75;">Hola {recipient_name} <br><br>Tu novio te ha preparado este correo para que empieces bien la semana - aqui tienes lo mas importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>
+    <div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.75;">Hola {recipient_name} <br><br>Tu novio te ha preparado este correo para que empieces bien la semana - aqui tienes lo mas importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>
   </td></tr>
   {tendencias_section}
   {novedades_section}
@@ -449,7 +449,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
   {rincon_section}
   {linkedin_section}
   <tr><td style="background:{C_WHITE};border-radius:0 0 12px 12px;padding:16px 28px 24px;">
-    <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal - {fecha} - Generado por el mago de Jose Manuel Huertas</div>
+    <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal - {fecha} - Generado por el mago, el titan, el animal, maestro, genio, unico e irremplazable Jose Manuel Huertas</div>
   </td></tr>
 </table>
 </td></tr>
