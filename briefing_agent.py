@@ -150,7 +150,7 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
         "days": 7,
         "max_results": max_results,
         "include_answer": False,
-        "include_raw_content": False,
+        "include_raw_content": True,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -178,7 +178,7 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
         
         articles.append({
             "title":       r.get("title", ""),
-            "description": r.get("content", r.get("snippet", ""))[:400],
+            "description": r.get("content") or r.get("raw_content") or r.get("snippet", ""))[:3000],
             "source":      urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", ""),
             "url":         r.get("url", ""),
             "publishedAt": published_date,
@@ -213,6 +213,24 @@ def fetch_news(memory: dict) -> list[dict]:
 
 SYSTEM_PROMPT = """Eres el asistente semanal de una chica en prácticas como Brand Manager en YSL Beauty España (L'Oréal Luxe).
 
+IMPORTANTE:
+Nunca hables de campañas, productos, perfumes, colecciones o colaboraciones de forma genérica.
+
+Siempre menciona:
+- nombre exacto
+- colección exacta
+- perfume exacto
+- shade/línea si existe
+- celebrity/embajador
+- nombre oficial de la campaña
+- hashtags o claims relevantes si aparecen
+
+Ejemplo correcto:
+"Dior lanzó Rouge Dior Velvet Collection con Anya Taylor-Joy"
+
+Ejemplo incorrecto:
+"Dior lanzó una nueva colección de maquillaje"
+
 A partir de las noticias que recibes, genera un reporte semanal en español que cubra:
 1. TENDENCIAS — qué está trending en beauty y moda de lujo
 2. NOVEDADES — lanzamientos, campañas, colecciones nuevas
@@ -225,6 +243,12 @@ Si hay noticias de España, dales prioridad dentro de su sección.
 Genera 2 posts de LinkedIn completos listos para publicar — tono de profesional joven con criterio propio.
 
 IMPORTANTE: Las noticias ya han sido pre-filtradas para eliminar temas repetidos de semanas anteriores. Usa solo las noticias del listado.
+
+Cuando menciones una campaña o lanzamiento:
+- menciona el nombre exacto
+- menciona la marca exacta
+- menciona el producto exacto
+- menciona la fuente si está disponible
 
 Responde ÚNICAMENTE con JSON válido, sin markdown, sin backticks.
 
@@ -242,7 +266,9 @@ Responde ÚNICAMENTE con JSON válido, sin markdown, sin backticks.
     {
       "marca": "Nombre de la marca",
       "titulo": "Título de la novedad",
-      "descripcion": "Qué lanzaron/anunciaron y por qué importa (2-3 frases)",
+      "descripcion": "Incluye SIEMPRE: nombre exacto del producto/campaña/colección, celebrity o embajador si existe, plataforma o formato si aplica, mercado o país si se menciona y detalle concreto del lanzamiento
+
+Nunca hables de forma genérica.",
       "fuente": "Medio",
       "url": "URL",
       "es_españa": false
@@ -339,7 +365,7 @@ Genera el reporte semanal completo. Solo JSON."""
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_prompt},
         ],
-        temperature=0.7,
+        temperature=0.4,
         max_tokens=4096,
     )
 
