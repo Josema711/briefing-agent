@@ -311,7 +311,7 @@ def is_actual_news(article: dict) -> bool:
     )
 
         if has_bad_signal:
-        return False
+            return False
 
     return True
 
