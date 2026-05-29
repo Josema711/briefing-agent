@@ -1,5 +1,27 @@
 {
-  "seen_urls": [],
-  "seen_titles": [],
-  "covered_topics": []
+  "seen_urls": [
+    "https://fashionista.com/2026/05/best-fashion-beauty-launches-collabs-may-29",
+    "https://www.vogue.com/article/smells-like-gen-z-diesel-launches-womens-fragrance",
+    "https://www.beautypackaging.com/breaking-news/fragrance-world-launches-french-avenue-brand-in-brazil/",
+    "https://www.globalcosmeticsnews.com/ysl-beauty-names-charli-xcx-as-us-ambassador-to-front-new-makeup-era/",
+    "https://fashionista.com/2026/05/best-fashion-beauty-launches-collabs-may-29"
+  ],
+  "seen_titles": [
+    "Refillable beauty y fragancia innovadora",
+    "Fragancias para Gen Z",
+    "Skin Affair Soft Glow Cushion Foundation",
+    "Fragancia para mujeres",
+    "Partnership con Dataland",
+    "Charli XCX como embajadora",
+    "Skin Affair Soft Glow Cushion Foundation"
+  ],
+  "covered_topics": [
+    "Refillable beauty y fragancia innovadora (2026-05-29)",
+    "Fragancias para Gen Z (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "Diesel (2026-05-29)",
+    "L'Oréal Luxe (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "YSL Beauty (2026-05-29)"
+  ]
 }
