@@ -129,6 +129,8 @@ def update_memory(memory: dict, briefing: dict):
 
 # Queries para Tavily — cubren YSL, competencia, tendencias, digital y España
 SEARCH_QUERIES = [
+    "L'Oréal",
+    "L'Oréal Beauty new campaign",
     "YSL Beauty new campaign",
     "YSL Beauty fragrance launch",
     "YSL Beauty makeup launch",
