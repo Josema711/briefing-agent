@@ -104,27 +104,32 @@ def update_memory(memory: dict, briefing: dict):
 
 # ─── Búsqueda con Tavily ─────────────────────────────────────────────────────
 SEARCH_QUERIES = [
-    # YSL / L'Oréal Luxe
-    "YSL Beauty new campaign launch this week",
-    "YSL Beauty upcoming launch 2026",
-    "L'Oreal Luxe beauty campaign announced",
-    # Competencia directa
-    "Dior Beauty new launch this week",
-    "Chanel Beauty campaign unveiled",
-    "Tom Ford Beauty new fragrance launch",
-    "Givenchy Beauty upcoming collection",
-    "Armani Beauty campaign starring",
-    "Lancome beauty activation launch",
-    # Digital
-    "Luxury beauty TikTok campaign launched",
-    "Luxury beauty Instagram activation",
-    "Luxury beauty creator collaboration",
-    # Retail / activaciones
-    "Luxury beauty pop-up opening",
-    "Beauty immersive activation luxury",
-    # España
-    "Beauty luxury Spain campaign launch",
-    "YSL Beauty Spain event",
+# YSL
+"YSL Beauty campaign launch celebrity",
+"YSL Beauty fragrance launch",
+"YSL Beauty makeup collection launch",
+# Dior
+"Dior Beauty campaign starring",
+"Dior Beauty limited edition collection",
+# Chanel
+"Chanel Beauty campaign Jennie",
+"Chanel Beauty Les Beiges launch",
+# Prada / Valentino / Armani
+"Prada Beauty launch campaign",
+"Valentino Beauty new collection",
+"Armani Beauty campaign celebrity",
+# Fragrance
+"luxury fragrance launch celebrity campaign",
+"new luxury perfume launch 2026",
+# Retail / experiential
+"beauty pop-up luxury brand",
+"immersive beauty activation luxury",
+# TikTok / creators
+"beauty TikTok creator partnership luxury",
+"beauty campaign creator collaboration",
+# Spain
+"YSL Beauty Spain event Madrid",
+"luxury beauty event Spain",
 ]
 
 FRESH_KEYWORDS = [
@@ -355,6 +360,31 @@ Ejemplo CORRECTO:
 "Chanel presentó Les Beiges Golden Hour Collection con campaign film protagonizado por Jennie Kim"
 
 # FILTRADO EDITORIAL
+PROHIBIDO escribir frases vagas como:
+
+"la sostenibilidad sigue creciendo"
+"las redes sociales son importantes"
+"la personalización es tendencia"
+"las marcas siguen innovando"
+
+Cada insight DEBE incluir al menos UNO de estos elementos concretos:
+
+nombre de producto
+nombre de colección
+celebrity
+ambassador
+campaña
+plataforma
+activación
+pop-up
+colaboración
+ciudad
+retailer
+evento
+formato digital específico
+
+Si no existen detalles concretos en la noticia:
+NO la incluyas.
 
 Si una noticia:
 - no contiene novedad clara
@@ -364,6 +394,7 @@ Si una noticia:
 - habla de productos antiguos sin novedad
 - es contenido SEO
 - es demasiado genérica
+- habla de "sostenibilidad", "influencers", "personalización" o "crecimiento del mercado" sin un caso concreto
 
 → NO la incluyas.
 
@@ -533,7 +564,7 @@ TEMAS YA CUBIERTOS EN SEMANAS ANTERIORES (no repetir):
 {covered_text}
 
 NOTICIAS DE ESTA SEMANA:
-{articles_text if articles_text else "No se encontraron noticias nuevas — genera el briefing con tendencias generales del sector."}
+{articles_text if articles_text else "NO HAY SUFICIENTES NOTICIAS RELEVANTES ESTA SEMANA. Devuelve arrays vacíos si es necesario. NO inventes tendencias genéricas."}
 
 Genera el reporte semanal completo. Solo JSON."""
 
