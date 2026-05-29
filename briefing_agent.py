@@ -103,60 +103,51 @@ def update_memory(memory: dict, briefing: dict):
 
 
 # ─── Búsqueda con Tavily ─────────────────────────────────────────────────────
+CURRENT_YEAR = datetime.now().year
 
 SEARCH_QUERIES = [
     # YSL y L'Oréal Luxe
-    "YSL Beauty Saint Laurent latest news campaign 2025",
+    "YSL Beauty Saint Laurent latest news campaign",
     "L'Oreal Luxe luxury beauty news this week",
     # Competencia
     "Dior Beauty Chanel beauty new campaign launch",
     "Tom Ford Givenchy Armani beauty news",
-    "Lancôme luxury beauty launch 2025",
+    "Lancôme luxury beauty launch",
     # Tendencias
-    "luxury beauty makeup trend 2025",
-    "luxury perfume fragrance launch news",
-    "luxury fashion house beauty news LVMH Kering",
+    "Luxury beauty makeup trend",
+    "Luxury perfume fragrance launch news",
+    "Luxury fashion house beauty news LVMH Kering",
     # Digital y social
-    "luxury beauty TikTok viral trend campaign",
-    "luxury brand Instagram social media campaign beauty",
+    "Luxury beauty TikTok viral trend campaign",
+    "Luxury brand Instagram social media campaign beauty",
     # España
     "YSL belleza lujo España noticias",
-    "belleza lujo tendencia moda España 2025",
+    "Belleza lujo tendencia moda España",
     # Hombre
-    "men luxury fragrance grooming skincare launch 2025",
+    "Men luxury fragrance grooming skincare launch",
 ]
 
 def is_within_date_range(date_str: str, days: int = 7) -> bool:
-    """
-    Verifica si una fecha está dentro de ±{days} días de hoy.
-    Soporta formatos: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ, etc.
-    """
     try:
-        # Parsear diferentes formatos de fecha
-        for fmt in ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"]:
-            try:
-                article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
-                break
-            except ValueError:
-                continue
-        else:
-            # Si no se puede parsear, aceptar el artículo
-            log.warning(f"No se pudo parsear fecha: {date_str}")
-            return True
-        
+        article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
         now = datetime.now()
-        date_diff = abs((now - article_date).days)
-        
-        return date_diff <= days
-    except Exception as e:
-        log.warning(f"Error al filtrar fecha {date_str}: {e}")
-        return True
+
+        return (
+            now - timedelta(days=days)
+            <= article_date
+            <= now
+        )
+
+    except Exception:
+        return False
 
 def tavily_search(query: str, max_results: int = 5) -> list[dict]:
     payload = json.dumps({
         "api_key":     TAVILY_API_KEY,
         "query":       query,
-        "search_depth": "basic",
+        "topic": "news",
+        "search_depth": "advanced",
+        "days": 7,
         "max_results": max_results,
         "include_answer": False,
         "include_raw_content": False,
@@ -173,11 +164,16 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
 
     articles = []
     for r in data.get("results", []):
-        published_date = r.get("published_date", datetime.now().strftime("%Y-%m-%d"))
+        published_date = r.get("published_date")
+
+        if not published_date:
+            log.info(f"Sin fecha: {r.get('title')}")
+            continue
         
         # Filtrar por rango de fechas: ±7 días
         if not is_within_date_range(published_date, days=7):
-            log.info(f"Artículo descartado (fuera de rango): {r.get('title', '')} ({published_date})")
+            log.info(f"Fuera de rango: {r.get('title')} ({published_date})"
+    )
             continue
         
         articles.append({
