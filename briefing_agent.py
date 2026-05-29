@@ -677,6 +677,9 @@ Formato EXACTO:
 """
 
 def generate_briefing(articles: list, memory: dict) -> dict:
+    covered = memory.get("covered_topics", [])[-25:]
+
+    covered_text = "\n".join(
         f"- {t}"
         for t in covered
     )
