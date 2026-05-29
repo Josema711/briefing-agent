@@ -310,8 +310,8 @@ def is_actual_news(article: dict) -> bool:
         for keyword in BAD_KEYWORDS
     )
 
-        if has_bad_signal:
-            return False
+    if has_bad_signal:
+        return False
 
     return True
 
