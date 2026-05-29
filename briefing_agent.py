@@ -103,54 +103,73 @@ def update_memory(memory: dict, briefing: dict):
 
 
 # ─── Búsqueda con Tavily ─────────────────────────────────────────────────────
-CURRENT_YEAR = datetime.now().year
-
 SEARCH_QUERIES = [
-    # YSL y L'Oréal Luxe
-    "YSL Beauty Saint Laurent latest news campaign",
-    "L'Oreal Luxe luxury beauty news this week",
-    # Competencia
-    "Dior Beauty Chanel beauty new campaign launch",
-    "Tom Ford Givenchy Armani beauty news",
-    "Lancôme luxury beauty launch",
-    # Tendencias
-    "Luxury beauty makeup trend",
-    "Luxury perfume fragrance launch news",
-    "Luxury fashion house beauty news LVMH Kering",
-    # Digital y social
-    "Luxury beauty TikTok viral trend campaign",
-    "Luxury brand Instagram social media campaign beauty",
+    # YSL / L'Oréal Luxe
+    "YSL Beauty new campaign launch this week",
+    "YSL Beauty upcoming launch 2026",
+    "L'Oreal Luxe beauty campaign announced",
+    # Competencia directa
+    "Dior Beauty new launch this week",
+    "Chanel Beauty campaign unveiled",
+    "Tom Ford Beauty new fragrance launch",
+    "Givenchy Beauty upcoming collection",
+    "Armani Beauty campaign starring",
+    "Lancome beauty activation launch",
+    # Digital
+    "Luxury beauty TikTok campaign launched",
+    "Luxury beauty Instagram activation",
+    "Luxury beauty creator collaboration",
+    # Retail / activaciones
+    "Luxury beauty pop-up opening",
+    "Beauty immersive activation luxury",
     # España
-    "YSL belleza lujo España noticias",
-    "Belleza lujo tendencia moda España",
-    # Hombre
-    "Men luxury fragrance grooming skincare launch",
+    "Beauty luxury Spain campaign launch",
+    "YSL Beauty Spain event",
 ]
 
 FRESH_KEYWORDS = [
-    "launch",
+    # lanzamientos reales
+    "launches",
     "launched",
-    "introduces",
-    "introduced",
-    "new campaign",
-    "new collection",
-    "debut",
-    "debuts",
     "unveils",
     "unveiled",
-    "announces",
-    "announcement",
+    "introduces",
+    "introduced",
+    "debut",
+    "debuts",
+    # campañas nuevas
+    "new campaign",
+    "campaign starring",
+    "campaign featuring",
+    # colecciones
+    "new collection",
+    "capsule collection",
+    "limited edition",
+    "holiday collection",
+    "summer collection",
+    "fall collection",
+    "spring collection",
+    # colaboraciones
     "collaboration",
     "partnership",
+    "co-created",
+    "exclusive drop",
+    # retail / eventos
     "pop-up",
-    "opening",
-    "limited edition",
-    "drops",
-    "release",
-    "coming soon",
-    "next week",
+    "flagship opening",
+    "immersive experience",
+    "activation",
+    # futuro próximo
+    "coming next week",
+    "coming this month",
+    "set to launch",
+    "will launch",
+    "scheduled to release",
+    # 2026
+    "2026 launch",
     "2026 collection",
 ]
+
 
 GOOD_SOURCES = [
     "voguebusiness.com",
@@ -164,14 +183,16 @@ GOOD_SOURCES = [
 
 def is_actual_news(article: dict) -> bool:
     text = (
-        article.get("title", "") + " " +
-        article.get("description", "")
+    article.get("title", "") + " " +
+    article.get("description", "")
     ).lower()
-
-    return any(
+    # Debe contener señales de novedad
+    has_fresh_signal = any(
         keyword in text
         for keyword in FRESH_KEYWORDS
     )
+    return has_fresh_signal
+
 
 def is_within_date_range(date_str: str, days: int = 7) -> bool:
     try:
@@ -179,9 +200,9 @@ def is_within_date_range(date_str: str, days: int = 7) -> bool:
         now = datetime.now()
 
         return (
-            now - timedelta(days=days)
+            now - timedelta(days=7)
             <= article_date
-            <= now
+            <= now + imedelta(days=7)
         )
 
     except Exception:
@@ -236,27 +257,40 @@ def fetch_news(memory: dict) -> list[dict]:
     log.info("Buscando noticias con Tavily...")
     all_articles = []
     seen_urls = set()
-
+    
     for query in SEARCH_QUERIES:
         try:
-            results = tavily_search(query, max_results=4)
+            results = tavily_search(query, max_results=5)
             for a in results:
                 url = a.get("url", "")
-                if url and url not in seen_urls and a.get("title") and "[Removed]" not in a.get("title", ""):
-                    seen_urls.add(url)
-                    all_articles.append(a)
+                if not url:
+                    continue
+                if url in seen_urls:
+                    continue
+                if not a.get("title"):
+                    continue
+                if "[Removed]" in a.get("title", ""):
+                    continue
+                # SOLO noticias realmente nuevas
+                if not is_actual_news(a):
+                    log.info(f"Descartada por no ser novedad real: {a.get('title')}")
+                    continue
+    
+                seen_urls.add(url)
+                all_articles.append(a)
+    
         except Exception as e:
             log.warning(f"Error en búsqueda '{query}': {e}")
-
-    log.info(f"Total artículos encontrados: {len(all_articles)}")
-
-    # Filtrar los ya vistos en semanas anteriores
-    if not is_actual_news(a):
-        continue
-    
+            
+    log.info(f"Noticias válidas encontradas: {len(all_articles)}")
     fresh_articles = filter_seen(all_articles, memory)
-    return fresh_articles[:40]
-
+    
+    # Ordenar por fecha más reciente
+    fresh_articles.sort(
+        key=lambda x: x.get("publishedAt", ""),
+        reverse=True
+    )
+return fresh_articles[:40]
 
 # ─── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -505,7 +539,7 @@ Genera el reporte semanal completo. Solo JSON."""
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": user_prompt},
         ],
-        temperature=0.4,
+        temperature=0.2,
         max_tokens=4096,
     )
 
