@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-YSL Beauty Intelligence Briefing Agent
----------------------------------------
-- Tavily para búsqueda real de artículos con contenido completo
-- Groq (llama) para generar el briefing en español
-- Memoria entre semanas en memory.json — no repite noticias
-- Gmail SMTP para enviar el email
+YSL Beauty Intelligence Briefing Agent — V2
+---------------------------------------------------
+MEJORAS:
+- Mejor filtrado de noticias reales
+- Más fuentes editoriales luxury beauty/fashion
+- Priorización Vogue / Harper's Bazaar / ELLE
+- Eliminación de artículos evergreen y SEO
+- Mejor deduplicación
+- Mejor control de fechas
+- Más inteligencia editorial
+- Emails más premium
+- Mejor memoria semanal
 """
 
 import smtplib
@@ -15,10 +23,15 @@ import logging
 import sys
 import urllib.request
 import urllib.parse
+import re
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from groq import Groq
+
+# ─────────────────────────────────────────────────────
+# LOGGING
+# ─────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,25 +41,16 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout),
     ],
 )
+
 log = logging.getLogger(__name__)
 
-def get_env(key: str) -> str:
-    val = os.environ.get(key, "").strip()
-    if not val:
-        raise EnvironmentError(f"Variable '{key}' no definida.")
-    return val
-
-GROQ_API_KEY       = get_env("GROQ_API_KEY")
-TAVILY_API_KEY     = get_env("TAVILY_API_KEY")
-GMAIL_USER         = get_env("GMAIL_USER")
-GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
-RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
-RECIPIENT_NAME     = get_env("RECIPIENT_NAME")
-TEST_MODE          = os.environ.get("TEST_MODE", "false").lower() == "true"
+# ─────────────────────────────────────────────────────
 
 MEMORY_FILE = "memory.json"
 
-# ─── Memoria entre semanas ───────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────
+# MEMORY
+# ─────────────────────────────────────────────────────
 
 def load_memory() -> dict:
     if os.path.exists(MEMORY_FILE):
@@ -55,171 +59,268 @@ def load_memory() -> dict:
                 return json.load(f)
         except Exception:
             pass
-    return {"seen_urls": [], "seen_titles": [], "covered_topics": []}
+
+    return {
+        "seen_urls": [],
+        "seen_titles": [],
+        "covered_topics": []
+    }
+
 
 def save_memory(memory: dict):
-    # Mantener solo las últimas 8 semanas para no crecer indefinidamente
-    memory["seen_urls"]      = memory["seen_urls"][-200:]
-    memory["seen_titles"]    = memory["seen_titles"][-200:]
-    memory["covered_topics"] = memory["covered_topics"][-60:]
+    memory["seen_urls"] = memory["seen_urls"][-400:]
+    memory["seen_titles"] = memory["seen_titles"][-400:]
+    memory["covered_topics"] = memory["covered_topics"][-120:]
+
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(memory, f, ensure_ascii=False, indent=2)
-    log.info(f"Memoria guardada: {len(memory['seen_urls'])} URLs, {len(memory['covered_topics'])} temas")
+
+    log.info(
+        f"Memoria guardada: {len(memory['seen_urls'])} URLs"
+    )
+def normalize_title(title: str) -> str:
+    title = title.lower()
+    title = re.sub(r"[^a-zA-Z0-9 ]", "", title)
+    title = re.sub(r"\s+", " ", title)
+    return title.strip()[:90]
+
 
 def filter_seen(articles: list, memory: dict) -> list:
-    seen_urls   = set(memory.get("seen_urls", []))
-    seen_titles = set(t.lower()[:60] for t in memory.get("seen_titles", []))
+    seen_urls = set(memory.get("seen_urls", []))
+    seen_titles = set(
+        normalize_title(t)
+        for t in memory.get("seen_titles", [])
+    )
+
     fresh = []
+
     for a in articles:
-        url   = a.get("url", "")
-        title = a.get("title", "").lower()[:60]
-        if url not in seen_urls and title not in seen_titles:
-            fresh.append(a)
-    log.info(f"Filtrado memoria: {len(articles)} → {len(fresh)} artículos nuevos")
+        url = a.get("url", "")
+        title = normalize_title(a.get("title", ""))
+
+        if not url:
+            continue
+
+        if url in seen_urls:
+            continue
+
+        if title in seen_titles:
+            continue
+
+        fresh.append(a)
+
+    log.info(
+        f"Filtrado memoria: {len(articles)} → {len(fresh)}"
+    )
+
     return fresh
 
+
 def update_memory(memory: dict, briefing: dict):
-    """Extrae URLs y temas del briefing generado y los guarda en memoria."""
     sections = [
         briefing.get("tendencias", []),
         briefing.get("novedades", []),
         briefing.get("noticias_casas_lujo", []),
         briefing.get("ysl_y_competencia", []),
-        briefing.get("digital_social", {}).get("campanas_destacadas", []),
         briefing.get("el_rincon", {}).get("items", []),
     ]
+
     for section in sections:
         for item in section:
-            url   = item.get("url", "")
-            title = item.get("titulo", item.get("title", ""))
+            url = item.get("url", "")
+            title = item.get("titulo", "")
+
             if url:
                 memory["seen_urls"].append(url)
+
             if title:
                 memory["seen_titles"].append(title)
-            # Guardar tema/marca como tópico cubierto
-            topic = item.get("marca", item.get("casa", item.get("titulo", "")))
+
+            topic = (
+                item.get("marca")
+                or item.get("casa")
+                or title
+            )
+
             if topic:
-                memory["covered_topics"].append(f"{topic} ({datetime.now().strftime('%Y-%m-%d')})")
+                memory["covered_topics"].append(
+                    f"{topic} ({datetime.now().strftime('%Y-%m-%d')})"
+                )
 
+# ─────────────────────────────────────────────────────
+# SEARCH CONFIG
+# ─────────────────────────────────────────────────────
 
-# ─── Búsqueda con Tavily ─────────────────────────────────────────────────────
 SEARCH_QUERIES = [
-# YSL
-"YSL Beauty campaign launch celebrity",
-"YSL Beauty fragrance launch",
-"YSL Beauty makeup collection launch",
-# Dior
-"Dior Beauty campaign starring",
-"Dior Beauty limited edition collection",
-# Chanel
-"Chanel Beauty campaign Jennie",
-"Chanel Beauty Les Beiges launch",
-# Prada / Valentino / Armani
-"Prada Beauty launch campaign",
-"Valentino Beauty new collection",
-"Armani Beauty campaign celebrity",
-# Fragrance
-"luxury fragrance launch celebrity campaign",
-"new luxury perfume launch 2026",
-# Retail / experiential
-"beauty pop-up luxury brand",
-"immersive beauty activation luxury",
-# TikTok / creators
-"beauty TikTok creator partnership luxury",
-"beauty campaign creator collaboration",
-# Spain
-"YSL Beauty Spain event Madrid",
-"luxury beauty event Spain",
+
+    # YSL
+    "YSL Beauty new campaign",
+    "YSL Beauty fragrance launch",
+    "YSL Beauty makeup launch",
+    "YSL Beauty ambassador",
+
+    # Chanel
+    "Chanel Beauty campaign",
+    "Chanel Beauty launch",
+
+    # Dior
+    "Dior Beauty launch",
+    "Dior Beauty celebrity campaign",
+
+    # Prada / Valentino / Armani
+    "Prada Beauty campaign",
+    "Valentino Beauty launch",
+    "Armani Beauty celebrity",
+
+    # Luxury fragrance
+    "luxury fragrance launch 2026",
+    "celebrity fragrance campaign luxury",
+
+    # TikTok / creators
+    "beauty creator collaboration luxury",
+    "beauty TikTok campaign luxury",
+
+    # Retail
+    "beauty pop-up luxury brand",
+    "immersive beauty activation",
+
+    # Spain
+    "YSL Beauty Spain",
+    "beauty luxury Spain Madrid",
+
+    # Fashion + beauty
+    "fashion beauty collaboration luxury",
 ]
 
+# ─────────────────────────────────────────────────────
+# PRIORITY SOURCES
+# ─────────────────────────────────────────────────────
+
+TOP_SOURCES = [
+    "voguebusiness.com",
+    "vogue.com",
+    "harpersbazaar.com",
+    "elle.com",
+    "wwd.com",
+    "businessoffashion.com",
+    "glossy.co",
+    "fashionista.com",
+]
+
+GOOD_SOURCES = [
+    "voguebusiness.com",
+    "vogue.com",
+    "harpersbazaar.com",
+    "elle.com",
+    "wwd.com",
+    "businessoffashion.com",
+    "glossy.co",
+    "fashionista.com",
+    "beautypackaging.com",
+    "premiumbeautynews.com",
+    "cosmeticsbusiness.com",
+    "hypebae.com",
+    "allure.com",
+    "forbes.com",
+    "retaildive.com",
+    "retailexchange.co.uk",
+]
+
+# ─────────────────────────────────────────────────────
+# FILTERS
+# ─────────────────────────────────────────────────────
+
 FRESH_KEYWORDS = [
-    # lanzamientos reales
+    "launch",
     "launches",
     "launched",
+    "debut",
+    "debuts",
+    "new campaign",
+    "campaign starring",
+    "campaign featuring",
     "unveils",
     "unveiled",
     "introduces",
     "introduced",
-    "debut",
-    "debuts",
-    # campañas nuevas
-    "new campaign",
-    "campaign starring",
-    "campaign featuring",
-    # colecciones
+    "limited edition",
     "new collection",
     "capsule collection",
-    "limited edition",
-    "holiday collection",
-    "summer collection",
-    "fall collection",
-    "spring collection",
-    # colaboraciones
-    "collaboration",
     "partnership",
-    "co-created",
-    "exclusive drop",
-    # retail / eventos
+    "collaboration",
     "pop-up",
-    "flagship opening",
-    "immersive experience",
     "activation",
-    # futuro próximo
-    "coming next week",
-    "coming this month",
-    "set to launch",
-    "will launch",
-    "scheduled to release",
-    # 2026
-    "2026 launch",
-    "2026 collection",
+    "ambassador",
+    "flagship",
+    "immersive",
+    "exclusive",
+    "drop",
 ]
 
-
-GOOD_SOURCES = [
-    "voguebusiness.com",
-    "businessoffashion.com",
-    "wwd.com",
-    "glossy.co",
-    "hypebae.com",
-    "beautypackaging.com",
-    "premiumbeautynews.com",
+BAD_KEYWORDS = [
+    "best beauty looks",
+    "shopping list",
+    "memorial day sale",
+    "sale",
+    "review",
+    "ranking",
+    "best products",
+    "editor favorites",
+    "gift guide",
+    "trend tracker",
+    "how to",
+    "tutorial",
+    "evergreen",
 ]
+
 
 def is_actual_news(article: dict) -> bool:
     text = (
-    article.get("title", "") + " " +
-    article.get("description", "")
+        article.get("title", "") + " " +
+        article.get("description", "")
     ).lower()
-    # Debe contener señales de novedad
+
     has_fresh_signal = any(
         keyword in text
         for keyword in FRESH_KEYWORDS
     )
-    return has_fresh_signal
 
+    has_bad_signal = any(
+        keyword in text
+        for keyword in BAD_KEYWORDS
+    )
 
-def is_within_date_range(date_str: str, days: int = 7) -> bool:
+    return has_fresh_signal and not has_bad_signal
+
+# ─────────────────────────────────────────────────────
+# DATE FILTER
+# ─────────────────────────────────────────────────────
+
+def is_within_date_range(date_str: str, days: int = 10) -> bool:
     try:
-        article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
-        now = datetime.now()
+        clean_date = date_str[:10]
 
-        return (
-            now - timedelta(days=7)
-            <= article_date
-            <= now + timedelta(days=7)
+        article_date = datetime.strptime(
+            clean_date,
+            "%Y-%m-%d"
         )
+
+        now = datetime.now()
+        delta = now - article_date
+
+        return timedelta(days=0) <= delta <= timedelta(days=days)
 
     except Exception:
         return False
 
-def tavily_search(query: str, max_results: int = 5) -> list[dict]:
+# ─────────────────────────────────────────────────────
+
     payload = json.dumps({
-        "api_key":     TAVILY_API_KEY,
-        "query":       query,
+        "api_key": TAVILY_API_KEY,
+        "query": query,
         "topic": "news",
         "search_depth": "advanced",
-        "days": 7,
+        "days": 10,
         "max_results": max_results,
         "include_answer": False,
         "include_raw_content": True,
@@ -231,76 +332,107 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req, timeout=25) as resp:
+    with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.loads(resp.read().decode())
 
     articles = []
+
     for r in data.get("results", []):
+
         published_date = r.get("published_date")
 
         if not published_date:
-            log.info(f"Sin fecha: {r.get('title')}")
             continue
-        
-        # Filtrar por rango de fechas: ±7 días
-        if not is_within_date_range(published_date, days=7):
-            log.info(f"Fuera de rango: {r.get('title')} ({published_date})"
-    )
+
+        if not is_within_date_range(published_date):
             continue
-        
-        articles.append({
-            "title":       r.get("title", ""),
-            "description": (r.get("content") or r.get("raw_content") or r.get("snippet", ""))[:3000],
-            "source":      urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", ""),
-            "url":         r.get("url", ""),
+
+        source = urllib.parse.urlparse(
+            r.get("url", "")
+        ).netloc.replace("www.", "")
+
+        if source not in GOOD_SOURCES:
+            continue
+
+        article = {
+            "title": r.get("title", ""),
+            "description": (
+                r.get("content")
+                or r.get("raw_content")
+                or ""
+            )[:3500],
+            "source": source,
+            "url": r.get("url", ""),
             "publishedAt": published_date,
-        })
+        }
+
+        if not article["title"]:
+            continue
+
+        if not is_actual_news(article):
+            continue
+
+        articles.append(article)
+
     return articles
 
+# ─────────────────────────────────────────────────────
+# FETCH NEWS
+# ─────────────────────────────────────────────────────
 
-def fetch_news(memory: dict) -> list[dict]:
+def fetch_news(memory: dict) -> list:
+
     log.info("Buscando noticias con Tavily...")
+
     all_articles = []
     seen_urls = set()
-    
+
     for query in SEARCH_QUERIES:
+
         try:
-            results = tavily_search(query, max_results=5)
+            results = tavily_search(query)
+
             for a in results:
-                url = a.get("url", "")
+
+                url = a.get("url")
+
                 if not url:
                     continue
+
                 if url in seen_urls:
                     continue
-                if not a.get("title"):
-                    continue
-                if "[Removed]" in a.get("title", ""):
-                    continue
-                source = a.get("source", "").lower()
-                if source not in GOOD_SOURCES:
-                    log.info(f"Fuente descartada: {source}")
-                    continue
-                # SOLO noticias realmente nuevas
-                if not is_actual_news(a):
-                    log.info(f"Descartada por no ser novedad real: {a.get('title')}")
-                    continue
-    
+
                 seen_urls.add(url)
                 all_articles.append(a)
-    
-        except Exception as e:
-            log.warning(f"Error en búsqueda '{query}': {e}")
-            
-    log.info(f"Noticias válidas encontradas: {len(all_articles)}")
-    fresh_articles = filter_seen(all_articles, memory)
-    
-    # Ordenar por fecha más reciente
-    fresh_articles.sort(
-    key=lambda x: x.get("publishedAt", ""),
-    reverse=True
-    )
-    return fresh_articles[:40]
 
+        except Exception as e:
+            log.warning(f"Error búsqueda '{query}': {e}")
+
+    # Priorizar Vogue / Harper's / ELLE
+    def source_priority(article):
+
+        source = article.get("source", "")
+
+        if source in TOP_SOURCES:
+            return 0
+
+        return 1
+
+    all_articles.sort(
+        key=lambda x: (
+            source_priority(x),
+            x.get("publishedAt", "")
+        ),
+        reverse=False
+    )
+
+    log.info(
+        f"Noticias válidas encontradas: {len(all_articles)}"
+    )
+
+    fresh_articles = filter_seen(all_articles, memory)
+
+    return fresh_articles[:45]
 # ─── Prompts ────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """
@@ -544,56 +676,70 @@ Formato EXACTO:
 - España primero si aplica
 """
 
-
 def generate_briefing(articles: list, memory: dict) -> dict:
-    log.info("Generando briefing con Groq...")
-    client = Groq(api_key=GROQ_API_KEY)
-
-    covered = memory.get("covered_topics", [])[-20:]
-    covered_text = "\n".join(f"- {t}" for t in covered) if covered else "Ninguno aún (primera semana)"
+        f"- {t}"
+        for t in covered
+    )
 
     articles_text = "\n\n".join([
-        f"• {a['title']}\n  {a['description']}\n  Fuente: {a['source']} | {a['url']} | {a.get('publishedAt','')[:10]}"
+        f"""
+TÍTULO: {a['title']}
+FUENTE: {a['source']}
+FECHA: {a['publishedAt'][:10]}
+URL: {a['url']}
+CONTENIDO: {a['description']}
+"""
         for a in articles
     ])
 
     today = datetime.now().strftime("%d de %B de %Y")
-    user_prompt = f"""Fecha: {today}
 
-TEMAS YA CUBIERTOS EN SEMANAS ANTERIORES (no repetir):
+    user_prompt = f"""
+Fecha: {today}
+
+TEMAS YA CUBIERTOS:
 {covered_text}
 
-NOTICIAS DE ESTA SEMANA:
-{articles_text if articles_text else "NO HAY SUFICIENTES NOTICIAS RELEVANTES ESTA SEMANA. Devuelve arrays vacíos si es necesario. NO inventes tendencias genéricas."}
+NOTICIAS:
+{articles_text}
 
-Genera el reporte semanal completo. Solo JSON."""
+Genera el briefing semanal.
+"""
 
     response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_prompt},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            },
+            {
+                "role": "user",
+                "content": user_prompt
+            }
         ],
-        temperature=0.2,
+        temperature=0.25,
         max_tokens=4096,
     )
 
     text = response.choices[0].message.content
-    if not text.strip():
-        raise ValueError("Groq no devolvió contenido")
 
-    clean = text.replace("```json", "").replace("```", "").strip()
-    
+    clean = (
+        text
+        .replace("```json", "")
+        .replace("```", "")
+        .strip()
+    )
+
     try:
         briefing = json.loads(clean)
-    except json.JSONDecodeError as e:
-        log.error(f"JSON inválido recibido de Groq: {e}")
+    except Exception:
         log.error(clean)
         raise
-        
-    log.info("Briefing generado correctamente")
-    return briefing
 
+    log.info("Briefing generado correctamente")
+
+    return briefing
 
 # ─── Paleta nude/terracota ───────────────────────────────────────────────────
 
