@@ -310,7 +310,10 @@ def is_actual_news(article: dict) -> bool:
         for keyword in BAD_KEYWORDS
     )
 
-    return has_fresh_signal and not has_bad_signal
+        if has_bad_signal:
+        return False
+
+    return True
 
 # ─────────────────────────────────────────────────────
 # DATE FILTER
@@ -320,18 +323,12 @@ def is_within_date_range(date_str: str, days: int = 10) -> bool:
     try:
         clean_date = date_str[:10]
 
-        article_date = datetime.strptime(
-            clean_date,
-            "%Y-%m-%d"
-        )
+        article_date = datetime.strptime(clean_date, "%Y-%m-%d")
 
-        now = datetime.now()
-        delta = now - article_date
-
-        return timedelta(days=0) <= delta <= timedelta(days=days)
+        return article_date >= datetime.now() - timedelta(days=days)
 
     except Exception:
-        return False
+        return True
 
 # ─────────────────────────────────────────────────────
 # TAVILY SEARCH
@@ -376,7 +373,8 @@ def tavily_search(query: str, max_results: int = 8) -> list:
         ).netloc.replace("www.", "")
 
         if source not in GOOD_SOURCES:
-            continue
+            # no bloquear, solo penalizar
+            article["source_quality"] = "low"
 
         article = {
             "title": r.get("title", ""),
