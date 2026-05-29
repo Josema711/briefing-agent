@@ -45,6 +45,23 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────
+# ENV VARIABLES
+# ─────────────────────────────────────────────────────
+
+def get_env(key: str) -> str:
+    val = os.environ.get(key, "").strip()
+    if not val:
+        raise EnvironmentError(f"Variable '{key}' no definida.")
+    return val
+
+GROQ_API_KEY       = get_env("GROQ_API_KEY")
+TAVILY_API_KEY     = get_env("TAVILY_API_KEY")
+GMAIL_USER         = get_env("GMAIL_USER")
+GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
+RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
+RECIPIENT_NAME     = get_env("RECIPIENT_NAME")
+
+TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 
 MEMORY_FILE = "memory.json"
 
@@ -78,6 +95,8 @@ def save_memory(memory: dict):
     log.info(
         f"Memoria guardada: {len(memory['seen_urls'])} URLs"
     )
+
+
 def normalize_title(title: str) -> str:
     title = title.lower()
     title = re.sub(r"[^a-zA-Z0-9 ]", "", title)
@@ -146,6 +165,7 @@ def update_memory(memory: dict, briefing: dict):
                 memory["covered_topics"].append(
                     f"{topic} ({datetime.now().strftime('%Y-%m-%d')})"
                 )
+
 
 # ─────────────────────────────────────────────────────
 # SEARCH CONFIG
@@ -314,6 +334,10 @@ def is_within_date_range(date_str: str, days: int = 10) -> bool:
         return False
 
 # ─────────────────────────────────────────────────────
+# TAVILY SEARCH
+# ─────────────────────────────────────────────────────
+
+def tavily_search(query: str, max_results: int = 8) -> list:
 
     payload = json.dumps({
         "api_key": TAVILY_API_KEY,
@@ -433,7 +457,10 @@ def fetch_news(memory: dict) -> list:
     fresh_articles = filter_seen(all_articles, memory)
 
     return fresh_articles[:45]
-# ─── Prompts ────────────────────────────────────────────────────────────────────
+    
+# ─────────────────────────────────────────────────────
+# SYSTEM PROMPT
+# ─────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """
 Eres el asistente semanal de intelligence y tendencias para una Brand Manager en prácticas de YSL Beauty España (L'Oréal Luxe).
@@ -676,7 +703,15 @@ Formato EXACTO:
 - España primero si aplica
 """
 
+# ─────────────────────────────────────────────────────
+# GENERATE BRIEFING
+# ─────────────────────────────────────────────────────
 def generate_briefing(articles: list, memory: dict) -> dict:
+
+    log.info("Generando briefing con Groq...")
+
+    client = Groq(api_key=GROQ_API_KEY)
+
     covered = memory.get("covered_topics", [])[-25:]
 
     covered_text = "\n".join(
