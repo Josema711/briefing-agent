@@ -202,7 +202,7 @@ def is_within_date_range(date_str: str, days: int = 7) -> bool:
         return (
             now - timedelta(days=7)
             <= article_date
-            <= now + imedelta(days=7)
+            <= now + timedelta(days=7)
         )
 
     except Exception:
@@ -226,7 +226,7 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=25) as resp:
         data = json.loads(resp.read().decode())
 
     articles = []
@@ -271,6 +271,10 @@ def fetch_news(memory: dict) -> list[dict]:
                     continue
                 if "[Removed]" in a.get("title", ""):
                     continue
+                source = a.get("source", "").lower()
+                if source not in GOOD_SOURCES:
+                    log.info(f"Fuente descartada: {source}")
+                    continue
                 # SOLO noticias realmente nuevas
                 if not is_actual_news(a):
                     log.info(f"Descartada por no ser novedad real: {a.get('title')}")
@@ -287,10 +291,10 @@ def fetch_news(memory: dict) -> list[dict]:
     
     # Ordenar por fecha más reciente
     fresh_articles.sort(
-        key=lambda x: x.get("publishedAt", ""),
-        reverse=True
+    key=lambda x: x.get("publishedAt", ""),
+    reverse=True
     )
-return fresh_articles[:40]
+    return fresh_articles[:40]
 
 # ─── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -548,7 +552,14 @@ Genera el reporte semanal completo. Solo JSON."""
         raise ValueError("Groq no devolvió contenido")
 
     clean = text.replace("```json", "").replace("```", "").strip()
-    briefing = json.loads(clean)
+    
+    try:
+        briefing = json.loads(clean)
+    except json.JSONDecodeError as e:
+        log.error(f"JSON inválido recibido de Groq: {e}")
+        log.error(clean)
+        raise
+        
     log.info("Briefing generado correctamente")
     return briefing
 
@@ -755,7 +766,7 @@ def send_email(html_body: str, subject: str):
     RECIPIENT_EMAIL,
     "jhuertaspresmanes@icloud.com"
 ]
-    msg.attach(MIMEText(html_body, "utf-8"))
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_USER, recipients, msg.as_string())
