@@ -1,5 +1,51 @@
 {
-  "seen_urls": [],
-  "seen_titles": [],
-  "covered_topics": []
+  "seen_urls": [
+    "https://www.instagram.com/reel/DIQyNUhICIw",
+    "https://www.tiktok.com/@listluxurybeauty/video/7575180263332908306",
+    "https://www.youtube.com/watch?v=9NGcODFWi6A",
+    "https://www.businessoffashion.com/articles/luxury/will-lvmh-and-kering-continue-to-dominate-luxury-fashion",
+    "https://retailbeauty.com.au/kering-disrupts-luxury-beauty-with-new-in-house-division",
+    "https://unitymarketingonline.com/study-in-contrasts-kerings-gucci-goes-down-and-lvmh-is-up-up-up",
+    "https://www.instagram.com/reel/DIQyNUhICIw",
+    "https://www.youtube.com/watch?v=9NGcODFWi6A",
+    "https://www.businessoffashion.com/articles/beauty/whats-in-store-for-tom-ford-beauty",
+    "https://www.businessoffashion.com/articles/beauty/whats-in-store-for-tom-ford-beauty",
+    "https://www.youtube.com/watch?v=9NGcODFWi6A"
+  ],
+  "seen_titles": [
+    "Regreso a la elegancia",
+    "Sostenibilidad y lujo",
+    "Tecnología y belleza",
+    "Lanzamiento de la campaña LOVESHINE 2025",
+    "Lanzamiento de la caja de belleza navideña 2025",
+    "Lanzamiento de la fragancia Riviera",
+    "Adquisición de la cartera de belleza de lujo de Kering",
+    "Lanzamiento de la división de belleza de lujo",
+    "Crecimiento en el mercado de la belleza de lujo",
+    "Lanzamiento de la campaña LOVESHINE 2025",
+    "Lanzamiento de la fragancia Riviera",
+    "Estrategia de expansión en el mercado de la belleza de lujo",
+    "Campaña LOVESHINE 2025",
+    "Caja de belleza navideña 2025",
+    "Fragancia para hombres",
+    "Grooming para hombres"
+  ],
+  "covered_topics": [
+    "Regreso a la elegancia (2026-05-29)",
+    "Sostenibilidad y lujo (2026-05-29)",
+    "Tecnología y belleza (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "Lancôme (2026-05-29)",
+    "Dior (2026-05-29)",
+    "L'Oréal Luxe (2026-05-29)",
+    "Kering (2026-05-29)",
+    "LVMH (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "Dior (2026-05-29)",
+    "Tom Ford (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "Lancôme (2026-05-29)",
+    "Tom Ford (2026-05-29)",
+    "Dior (2026-05-29)"
+  ]
 }
