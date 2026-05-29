@@ -522,10 +522,14 @@ def send_email(html_body: str, subject: str):
     msg["Subject"] = subject
     msg["From"]    = f"Beauty Briefing <{GMAIL_USER}>"
     msg["To"]      = RECIPIENT_EMAIL
+    recipients = [
+    RECIPIENT_EMAIL,
+    "jhuertaspresmanes@icloud.com"
+]
     msg.attach(MIMEText(html_body, "utf-8"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
+        server.sendmail(GMAIL_USER, recipients, msg.as_string())
     log.info("✅ Email enviado correctamente")
 
 
