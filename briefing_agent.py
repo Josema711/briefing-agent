@@ -178,7 +178,7 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
         
         articles.append({
             "title":       r.get("title", ""),
-            "description": r.get("content") or r.get("raw_content") or r.get("snippet", ""))[:3000],
+            "description": (r.get("content") or r.get("raw_content") or r.get("snippet", ""))[:3000],
             "source":      urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", ""),
             "url":         r.get("url", ""),
             "publishedAt": published_date,
