@@ -1,5 +1,27 @@
 {
-  "seen_urls": [],
-  "seen_titles": [],
-  "covered_topics": []
+  "seen_urls": [
+    "https://fashionista.com/2026/05/best-fashion-beauty-launches-collabs-may-29",
+    "https://www.cosmeticsbusiness.com/medik8-to-open-lab-themed-uk-pop-up-with-space-nk",
+    "https://jdcorporateblog.com/chanel-official-flagship-store-debuts-on-jd-com-with-exclusive-beauty-launches-for-gifting-season",
+    "https://www.vogue.com/article/inside-ysl-beautys-gen-z-playbook",
+    "https://fashionista.com/2026/05/best-fashion-beauty-launches-collabs-may-29"
+  ],
+  "seen_titles": [
+    "Refillable beauty y fragancia innovadora",
+    "Culinary Turn en perfumes de nicho",
+    "Lanzamiento de Skin Affair Soft Glow Cushion Foundation",
+    "Lanzamiento de Exo-PDRN Prismatic+",
+    "Lanzamiento de la tienda oficial de Chanel en JD.com",
+    "YSL Beauty celebra su primera fiesta de bloque en Madrid",
+    "Skin Affair Soft Glow Cushion Foundation"
+  ],
+  "covered_topics": [
+    "Refillable beauty y fragancia innovadora (2026-05-29)",
+    "Culinary Turn en perfumes de nicho (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "Medik8 (2026-05-29)",
+    "Chanel (2026-05-29)",
+    "YSL Beauty (2026-05-29)",
+    "YSL Beauty (2026-05-29)"
+  ]
 }
