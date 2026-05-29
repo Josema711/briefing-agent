@@ -958,7 +958,7 @@ def send_email(html_body: str, subject: str):
 def main():
     log.info("=" * 55)
     log.info("Beauty Briefing Agent — inicio")
-    log.info(f"TEST_MODE: {TEST_MODE}")
+    #log.info(f"TEST_MODE: {TEST_MODE}")
     log.info("=" * 55)
 
     memory   = load_memory()
