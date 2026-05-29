@@ -126,6 +126,32 @@ SEARCH_QUERIES = [
     "men luxury fragrance grooming skincare launch 2025",
 ]
 
+def is_within_date_range(date_str: str, days: int = 7) -> bool:
+    """
+    Verifica si una fecha está dentro de ±{days} días de hoy.
+    Soporta formatos: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ, etc.
+    """
+    try:
+        # Parsear diferentes formatos de fecha
+        for fmt in ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S"]:
+            try:
+                article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
+                break
+            except ValueError:
+                continue
+        else:
+            # Si no se puede parsear, aceptar el artículo
+            log.warning(f"No se pudo parsear fecha: {date_str}")
+            return True
+        
+        now = datetime.now()
+        date_diff = abs((now - article_date).days)
+        
+        return date_diff <= days
+    except Exception as e:
+        log.warning(f"Error al filtrar fecha {date_str}: {e}")
+        return True
+
 def tavily_search(query: str, max_results: int = 5) -> list[dict]:
     payload = json.dumps({
         "api_key":     TAVILY_API_KEY,
@@ -147,12 +173,19 @@ def tavily_search(query: str, max_results: int = 5) -> list[dict]:
 
     articles = []
     for r in data.get("results", []):
+        published_date = r.get("published_date", datetime.now().strftime("%Y-%m-%d"))
+        
+        # Filtrar por rango de fechas: ±7 días
+        if not is_within_date_range(published_date, days=7):
+            log.info(f"Artículo descartado (fuera de rango): {r.get('title', '')} ({published_date})")
+            continue
+        
         articles.append({
             "title":       r.get("title", ""),
             "description": r.get("content", r.get("snippet", ""))[:400],
             "source":      urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", ""),
             "url":         r.get("url", ""),
-            "publishedAt": r.get("published_date", datetime.now().strftime("%Y-%m-%d")),
+            "publishedAt": published_date,
         })
     return articles
 
@@ -180,7 +213,7 @@ def fetch_news(memory: dict) -> list[dict]:
     return fresh_articles[:40]
 
 
-# ─── Prompts ─────────────────────────────────────────────────────────────────
+# ─── Prompts ────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """Eres el asistente semanal de una chica en prácticas como Brand Manager en YSL Beauty España (L'Oréal Luxe).
 
@@ -362,7 +395,7 @@ def news_card(item: dict, show_marca: bool = False) -> str:
     marca = item.get("marca", item.get("casa", ""))
 
     return f"""<div style="background:{C_WHITE};border:1px solid {C_BORDER};border-radius:10px;padding:16px 20px;margin-bottom:10px;">
-      {f'<div style="font-size:11px;font-weight:700;color:{C_ACCENT};letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">{marca}{spain_badge() if es else ""}</div>' if show_marca and marca else (spain_badge() if es else "")}
+      {f'<div style="font-size:11px;font-weight:700;color:{C_ACCENT};letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">{marca}{spain_badge() if es else ""}</div>' if show_marca and marca else ''}
       <div style="font-size:15px;font-weight:600;color:{C_TEXT};line-height:1.35;margin-bottom:8px;">{titulo_html}</div>
       <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;">{item.get('descripcion','')}</div>
       <div style="font-size:11px;color:#ccc;margin-top:8px;font-style:italic;">{item.get('fuente','')}</div>
@@ -438,8 +471,8 @@ def render_email_html(data: dict, recipient_name: str) -> str:
       {section_header("Digital & Social Media", "📱", "#7a8fa6")}
       <div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.7;margin-bottom:14px;">{digital.get('resumen','')}</div>
       {campanas_html}
-      {f'<div style="background:#f0f4f8;border-left:3px solid #7a8fa6;border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:10px;"><div style="font-size:10px;font-weight:700;color:#7a8fa6;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:6px;">Radar competencia</div><div style="font-size:13px;color:{C_TEXT};line-height:1.65;">{digital.get("radar_competencia","")}</div></div>' if digital.get("radar_competencia") else ""}
-      {f'<div style="background:{C_TAG_BG};border-left:3px solid {C_ACCENT};border-radius:0 8px 8px 0;padding:12px 16px;"><div style="font-size:10px;font-weight:700;color:{C_ACCENT};letter-spacing:0.15em;text-transform:uppercase;margin-bottom:6px;">Tendencia emergente</div><div style="font-size:13px;color:{C_TEXT};line-height:1.65;">{digital.get("tendencia_emergente","")}</div></div>' if digital.get("tendencia_emergente") else ""}
+      {f'<div style="background:#f0f4f8;border-left:3px solid #7a8fa6;border-radius:0 8px 8px 0;padding:12px 16px;margin-bottom:10px;"><div style="font-size:10px;font-weight:700;color:#7a8fa6;letter-spacing:0.1em;">📊 RADAR COMPETENCIA</div><div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.6;margin-top:6px;">{digital.get("radar_competencia","")}</div></div>' if digital.get("radar_competencia") else ''}
+      {f'<div style="background:{C_TAG_BG};border-left:3px solid {C_ACCENT};border-radius:0 8px 8px 0;padding:12px 16px;"><div style="font-size:10px;font-weight:700;color:{C_ACCENT};letter-spacing:0.1em;">⚡ TENDENCIA EMERGENTE</div><div style="font-size:13px;color:{C_TEXT_LIGHT};line-height:1.6;margin-top:6px;">{digital.get("tendencia_emergente","")}</div></div>' if digital.get("tendencia_emergente") else ''}
     </td></tr>""" if digital else ""
 
     # El Rincón
@@ -492,7 +525,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     </td></tr>
 
     <tr><td style="background:{C_WHITE};padding:20px 28px 16px;">
-      <div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.75;">Hola {recipient_name} 💛 Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante en tendencias, novedades, YSL y competencia, y tus dos posts de LinkedIn listos para publicar.<br><br><span style="font-size:12px;color:{C_ACCENT};font-style:italic;">(te quiero)</span></div>
+      <div style="font-size:13.5px;color:{C_TEXT_LIGHT};line-height:1.75;">Hola {recipient_name} 💛 Tu novio te ha preparado este correo para que empieces bien la semana — aquí tienes lo más importante del mundo beauty y lujo en los últimos días. Enjoy! 🌟</div>
     </td></tr>
 
     {tendencias_section}
@@ -504,7 +537,7 @@ def render_email_html(data: dict, recipient_name: str) -> str:
     {linkedin_section}
 
     <tr><td style="background:{C_WHITE};border-radius:0 0 12px 12px;padding:16px 28px 24px;">
-      <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal · {fecha} · Generado por el mago de Jose Manuel Huertas</div>
+      <div style="border-top:1px solid {C_BORDER};padding-top:16px;font-size:11px;color:#ccc;text-align:center;">Beauty Briefing semanal · {fecha} · Generado por el mago de Jose Manuel Huertas ✨</div>
     </td></tr>
 
   </table>
