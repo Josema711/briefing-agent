@@ -4,7 +4,7 @@ on:
   schedule:
     # Lunes 9:00 AM España verano (UTC+2 → 07:00 UTC)
     # En invierno cambiar a: '0 8 * * 1'
-    - cron: '45 7 * * 1'
+    - cron: '00 6 * * 1'
 
   workflow_dispatch:
     inputs:
