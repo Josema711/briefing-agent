@@ -1,5 +1,27 @@
 {
-  "seen_urls": [],
-  "seen_titles": [],
-  "covered_topics": []
+  "seen_urls": [
+    "https://www.vogue.com/article/inside-ysl-beautys-gen-z-playbook",
+    "https://www.cosmeticsbusiness.com/medik8-to-open-lab-themed-uk-pop-up-with-space-nk",
+    "https://www.beautypackaging.com/breaking-news/fragrance-world-launches-french-avenue-brand-in-brazil/",
+    "https://vogue.ph/beauty/makeup/charli-xcx-rock-beauty-interview/",
+    "https://www.cosmeticsbusiness.com/medik8-to-open-lab-themed-uk-pop-up-with-space-nk"
+  ],
+  "seen_titles": [
+    "Gen Z como objetivo principal",
+    "Crecimiento del mercado de la belleza",
+    "Block party en Madrid",
+    "Lanzamiento de Exo-PDRN Prismatic+",
+    "Colaboración con Dataland",
+    "Colaboración con Charli XCX",
+    "Exo-PDRN Prismatic+"
+  ],
+  "covered_topics": [
+    "Gen Z como objetivo principal (2026-06-01)",
+    "Crecimiento del mercado de la belleza (2026-06-01)",
+    "YSL Beauty (2026-06-01)",
+    "Medik8 (2026-06-01)",
+    "L'Oréal Luxe (2026-06-01)",
+    "YSL Beauty (2026-06-01)",
+    "Medik8 (2026-06-01)"
+  ]
 }
