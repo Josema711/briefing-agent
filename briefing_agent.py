@@ -462,32 +462,38 @@ def generate_briefing(articles: list, memory: dict) -> dict:
     """
     Envía las noticias a Groq (llama-3.3-70b) con el system prompt
     y devuelve el briefing como diccionario Python.
-    Limita a 35 artículos y 550 chars por descripción para no superar
-    el límite de tokens de Groq (12k TPM en free tier).
+    Usa presupuestos progresivamente mas compactos para respetar
+    el limite gratuito de Groq (12k TPM).
     """
     log.info("Generando briefing con Groq...")
     client = Groq(api_key=GROQ_API_KEY)
-
-    # Últimos 25 temas cubiertos para que el modelo no los repita
-    covered      = memory.get("covered_topics", [])[-25:]
-    covered_text = "\n".join(f"- {t}" for t in covered)
-    recent_titles = memory.get("seen_titles", [])[-40:]
-    recent_titles_text = "\n".join(f"- {t}" for t in recent_titles)
-
-    # Formatear artículos: máx 35, contenido recortado para dar mas detalle sin romper el tier gratis.
-    articles_text = "\n\n".join([
-        f"TITULO: {a['title']}\n"
-        f"FUENTE: {a['source']} | {a['publishedAt'][:10]}\n"
-        f"URL: {a['url']}\n"
-        f"CONTENIDO: {a['description'][:550]}"
-        for a in articles[:35]
-    ])
 
     today = datetime.now(SPAIN_TZ).strftime("%d de %B de %Y")
     editorial_window = get_editorial_window()
     weekly_angle = get_weekly_angle()
 
-    user_prompt = f"""Fecha: {today}
+    attempts = [
+        {"articles": 24, "desc_chars": 320, "covered": 15, "titles": 24, "max_tokens": 3900},
+        {"articles": 18, "desc_chars": 240, "covered": 10, "titles": 16, "max_tokens": 3200},
+        {"articles": 12, "desc_chars": 180, "covered": 6, "titles": 10, "max_tokens": 2600},
+    ]
+
+    last_error = None
+    for idx, budget in enumerate(attempts, start=1):
+        covered = memory.get("covered_topics", [])[-budget["covered"]:]
+        covered_text = "\n".join(f"- {t}" for t in covered)
+        recent_titles = memory.get("seen_titles", [])[-budget["titles"]:]
+        recent_titles_text = "\n".join(f"- {t}" for t in recent_titles)
+
+        articles_text = "\n\n".join([
+            f"TITULO: {a['title']}\n"
+            f"FUENTE: {a['source']} | {a['publishedAt'][:10]}\n"
+            f"URL: {a['url']}\n"
+            f"CONTENIDO: {a['description'][:budget['desc_chars']]}"
+            for a in articles[:budget["articles"]]
+        ])
+
+        user_prompt = f"""Fecha: {today}
 {editorial_window}
 Enfoque editorial extra de esta semana: {weekly_angle}
 
@@ -502,27 +508,40 @@ NOTICIAS:
 
 Genera un briefing semanal fresco. Si dos noticias cuentan basicamente la misma historia, usa solo la mas concreta y convierte la otra en contexto, no en otra tarjeta."""
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_prompt},
-        ],
-        temperature=0.25,
-        max_tokens=6144,
-    )
+        log.info(
+            "Groq intento %s: %s articulos, %s chars/articulo, max_tokens=%s",
+            idx,
+            budget["articles"],
+            budget["desc_chars"],
+            budget["max_tokens"],
+        )
 
-    text  = response.choices[0].message.content
-    clean = text.replace("```json", "").replace("```", "").strip()
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                temperature=0.25,
+                max_tokens=budget["max_tokens"],
+            )
 
-    try:
-        briefing = json.loads(clean)
-    except Exception:
-        log.error(clean)
-        raise
+            text  = response.choices[0].message.content
+            clean = text.replace("```json", "").replace("```", "").strip()
+            briefing = json.loads(clean)
+            log.info("Briefing generado correctamente")
+            return briefing
+        except Exception as e:
+            last_error = e
+            error_text = str(e)
+            if "413" in error_text or "Request too large" in error_text or "TPM" in error_text:
+                log.warning("Groq rechazo el intento %s por tamano. Reintentando compacto...", idx)
+                continue
+            log.error("Error generando briefing: %s", error_text)
+            raise
 
-    log.info("Briefing generado correctamente")
-    return briefing
+    raise last_error
 
 
 # ─────────────────────────────────────────────────────
