@@ -406,9 +406,10 @@ Reglas duras:
 - Prioriza Espana, Francia, Europa y movimientos globales relevantes para lujo.
 - Incluye tambien moda/lujo aunque no sea beauty si ofrece una idea transferible a beauty.
 - Tono: ejecutivo, preciso, moderno, insider luxury. Cero relleno.
-- Incluye 3 ideas accionables para YSL/L'Oreal basadas en noticias concretas, con una accion que pudiera proponer una persona en practicas.
-- Incluye una seccion "para_comentar_con_jefa" con 4 bullets muy concretos que pueda decir en una reunion sin sonar generica.
+- Incluye 2 ideas accionables para YSL/L'Oreal basadas en noticias concretas, con una accion que pudiera proponer una persona en practicas.
+- Incluye una seccion "para_comentar_con_jefa" con 3 bullets muy concretos que pueda decir en una reunion sin sonar generica.
 - Variedad semanal: evita repetir las mismas marcas, temas y frases de semanas anteriores si hay alternativas nuevas.
+- Escribe corto: descripciones de 25-45 palabras. Posts de LinkedIn de maximo 120 palabras cada uno.
 
 POSTS LINKEDIN:
 - Dos posts completos, humanos y con punto de vista propio.
@@ -450,7 +451,7 @@ Responde UNICAMENTE con JSON valido. Sin markdown. Sin backticks.
   ]
 }
 
-Minimo 3 items por seccion si las noticias lo permiten. Maximo 5. Calidad y precision > cantidad. Espana primero si aplica.
+Maximo 3 items por seccion. En agenda, no_perder_de_vista e ideas_accionables, maximo 2. Calidad y precision > cantidad. Espana primero si aplica.
 """
 
 
@@ -473,9 +474,9 @@ def generate_briefing(articles: list, memory: dict) -> dict:
     weekly_angle = get_weekly_angle()
 
     attempts = [
-        {"articles": 24, "desc_chars": 320, "covered": 15, "titles": 24, "max_tokens": 3900},
-        {"articles": 18, "desc_chars": 240, "covered": 10, "titles": 16, "max_tokens": 3200},
-        {"articles": 12, "desc_chars": 180, "covered": 6, "titles": 10, "max_tokens": 2600},
+        {"articles": 20, "desc_chars": 260, "covered": 12, "titles": 18, "max_tokens": 3600, "items": 3},
+        {"articles": 14, "desc_chars": 200, "covered": 8, "titles": 12, "max_tokens": 3000, "items": 2},
+        {"articles": 10, "desc_chars": 150, "covered": 5, "titles": 8, "max_tokens": 2400, "items": 2},
     ]
 
     last_error = None
@@ -506,7 +507,7 @@ TITULARES/IDEAS RECIENTES QUE NO DEBES REPETIR:
 NOTICIAS:
 {articles_text}
 
-Genera un briefing semanal fresco. Si dos noticias cuentan basicamente la misma historia, usa solo la mas concreta y convierte la otra en contexto, no en otra tarjeta."""
+Genera un briefing semanal fresco. Maximo {budget['items']} items por seccion. Si dos noticias cuentan basicamente la misma historia, usa solo la mas concreta y convierte la otra en contexto, no en otra tarjeta. Devuelve JSON completo y valido; no cortes cadenas a medias."""
 
         log.info(
             "Groq intento %s: %s articulos, %s chars/articulo, max_tokens=%s",
@@ -525,6 +526,7 @@ Genera un briefing semanal fresco. Si dos noticias cuentan basicamente la misma 
                 ],
                 temperature=0.25,
                 max_tokens=budget["max_tokens"],
+                response_format={"type": "json_object"},
             )
 
             text  = response.choices[0].message.content
@@ -532,6 +534,14 @@ Genera un briefing semanal fresco. Si dos noticias cuentan basicamente la misma 
             briefing = json.loads(clean)
             log.info("Briefing generado correctamente")
             return briefing
+        except json.JSONDecodeError as e:
+            last_error = e
+            log.warning(
+                "Groq devolvio JSON incompleto en el intento %s: %s. Reintentando compacto...",
+                idx,
+                e,
+            )
+            continue
         except Exception as e:
             last_error = e
             error_text = str(e)
