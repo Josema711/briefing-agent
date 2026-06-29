@@ -2,14 +2,15 @@ name: YSL Beauty Intelligence Briefing
 
 on:
   schedule:
-    # Lunes 9:00 AM España verano (UTC+2 → 07:00 UTC)
-    # En invierno cambiar a: '0 8 * * 1'
-    - cron: '00 6 * * 1'
+    # Mondays at 08:30 in Spain. GitHub cron runs in UTC, so we schedule both
+    # possible UTC times and keep only the one matching Europe/Madrid locally.
+    - cron: '30 6 * * 1'
+    - cron: '30 7 * * 1'
 
   workflow_dispatch:
     inputs:
       test_mode:
-        description: 'Test mode (no envía email)'
+        description: 'Test mode (no envia email)'
         required: false
         default: 'false'
         type: choice
@@ -36,9 +37,28 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install groq
+        run: pip install -r requirements.txt
+
+      - name: Check Spain delivery time
+        id: schedule_gate
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          local_time="$(TZ=Europe/Madrid date +%H:%M)"
+          echo "Current time in Spain: $local_time"
+
+          if [ "$local_time" = "08:30" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Run briefing agent
+        if: steps.schedule_gate.outputs.should_run == 'true'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
@@ -50,7 +70,7 @@ jobs:
         run: python briefing_agent.py
 
       - name: Guardar memoria en el repo
-        if: always()
+        if: always() && steps.schedule_gate.outputs.should_run == 'true'
         run: |
           git config user.name "Beauty Briefing Bot"
           git config user.email "bot@briefing.local"
@@ -59,7 +79,7 @@ jobs:
           git push || true
 
       - name: Upload logs on failure
-        if: failure()
+        if: failure() && steps.schedule_gate.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: briefing-error-logs-${{ github.run_id }}
