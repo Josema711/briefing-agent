@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import smtplib
+import html
 import json
 import os
 import logging
@@ -40,15 +41,29 @@ def get_env(key: str) -> str:
         raise EnvironmentError(f"Variable '{key}' no definida.")
     return val
 
+TEST_MODE          = os.environ.get("TEST_MODE", "false").lower() == "true"
 GROQ_API_KEY       = get_env("GROQ_API_KEY")
 TAVILY_API_KEY     = get_env("TAVILY_API_KEY")
-GMAIL_USER         = get_env("GMAIL_USER")
-GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
-RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
-RECIPIENT_NAME     = get_env("RECIPIENT_NAME")
-TEST_MODE          = os.environ.get("TEST_MODE", "false").lower() == "true"
+GMAIL_USER         = os.environ.get("GMAIL_USER", "").strip()
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+RECIPIENT_EMAIL    = os.environ.get("RECIPIENT_EMAIL", "").strip()
+RECIPIENT_NAME     = os.environ.get("RECIPIENT_NAME", "").strip() or "there"
+CC_EMAIL           = os.environ.get("CC_EMAIL", "").strip()
+GROQ_MODELS        = [
+    model.strip()
+    for model in (
+        os.environ.get("GROQ_MODELS", "").strip()
+        or "openai/gpt-oss-120b,qwen/qwen3.6-27b,openai/gpt-oss-20b"
+    ).split(",")
+    if model.strip()
+]
 MEMORY_FILE        = "memory.json"
 SPAIN_TZ           = ZoneInfo("Europe/Madrid")
+
+if not TEST_MODE:
+    GMAIL_USER         = get_env("GMAIL_USER")
+    GMAIL_APP_PASSWORD = get_env("GMAIL_APP_PASSWORD")
+    RECIPIENT_EMAIL    = get_env("RECIPIENT_EMAIL")
 
 
 # ─────────────────────────────────────────────────────
@@ -70,9 +85,11 @@ def load_memory() -> dict:
 
 def save_memory(memory: dict):
     """Guarda la memoria recortando a los últimos 400 registros (~8 semanas)."""
-    memory["seen_urls"]      = memory["seen_urls"][-400:]
-    memory["seen_titles"]    = memory["seen_titles"][-400:]
-    memory["covered_topics"] = memory["covered_topics"][-120:]
+    memory["seen_urls"] = list(dict.fromkeys(memory.get("seen_urls", [])))[-400:]
+    memory["seen_titles"] = list(dict.fromkeys(memory.get("seen_titles", [])))[-400:]
+    memory["covered_topics"] = list(
+        dict.fromkeys(memory.get("covered_topics", []))
+    )[-120:]
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(memory, f, ensure_ascii=False, indent=2)
     log.info(f"Memoria guardada: {len(memory['seen_urls'])} URLs")
@@ -145,48 +162,20 @@ def update_memory(memory: dict, briefing: dict):
 # Queries para Tavily: beauty, L'Oreal Luxe, fragancias, moda, retail, inversiones,
 # colaboraciones, activaciones y movimientos de negocio utiles para proponer ideas.
 SEARCH_QUERIES = [
-    "L'Oreal Luxe beauty fragrance campaign launch",
-    "L'Oreal Paris beauty campaign launch",
-    "L'Oreal investment acquisition beauty startup",
-    "YSL Beauty new campaign launch fragrance makeup ambassador",
-    "YSL Beauty Spain Madrid activation pop-up event",
-    "YSL Beauty upcoming launch fragrance makeup",
-    "Lancôme beauty campaign fragrance launch ambassador",
-    "Armani Beauty fragrance campaign launch celebrity",
-    "Prada Beauty campaign fragrance makeup launch",
-    "Valentino Beauty fragrance makeup campaign launch",
-    "Mugler fragrance campaign launch",
-    "Maison Margiela Replica fragrance launch",
-    "Dior Beauty fragrance makeup campaign launch",
-    "Chanel Beauty fragrance makeup campaign launch",
-    "Tom Ford Beauty fragrance makeup launch campaign",
-    "Givenchy Beauty fragrance makeup launch campaign",
-    "luxury beauty celebrity ambassador campaign",
-    "luxury fragrance launch limited edition collaboration",
-    "beauty fashion collaboration luxury brand",
-    "fashion house beauty fragrance launch",
-    "luxury beauty pop-up immersive retail activation",
-    "beauty TikTok Instagram campaign luxury brand creator",
-    "beauty retail Sephora luxury launch exclusive",
-    "beauty Spain Madrid Barcelona luxury launch event",
-    "luxury group beauty investment acquisition partnership",
-    "LVMH beauty fragrance campaign launch investment",
-    "Kering beauty fragrance campaign launch investment",
-    "Puig beauty fragrance campaign launch IPO investment",
-    "Estée Lauder luxury beauty fragrance campaign launch",
-    "upcoming beauty launch announced next week fragrance luxury",
-    "luxury fashion girls trend campaign beauty inspiration",
-    "Gen Z luxury fashion beauty trend TikTok Instagram",
-    "celebrity red carpet beauty fashion campaign luxury",
-    "luxury fashion pop culture collaboration campaign",
-    "female luxury consumer beauty fashion trend",
-    "fashion week beauty trend luxury makeup fragrance",
-    "luxury brand experiential marketing beauty fashion",
-    "creator economy luxury beauty fashion campaign",
-    "K-pop luxury beauty fashion ambassador campaign",
-    "music film beauty fashion luxury collaboration",
-    "luxury retail pop-up fashion beauty Madrid Paris London",
-    "premium skincare fragrance bodycare luxury trend",
+    "L'Oreal Luxe YSL Beauty campaign launch fragrance makeup ambassador",
+    "Dior Chanel Prada Valentino Armani Givenchy luxury beauty launch campaign",
+    "luxury fragrance makeup skincare launch limited edition collaboration",
+    "beauty celebrity creator ambassador music film fashion collaboration",
+    "YSL Beauty L'Oreal Luxe Spain Madrid Barcelona activation pop-up event",
+    "luxury beauty retail Sephora pop-up immersive experience Europe",
+    "beauty TikTok Instagram social commerce creator campaign luxury brand",
+    "LVMH Kering Puig Estee Lauder beauty investment acquisition partnership",
+    "fashion week runway beauty makeup fragrance trend luxury",
+    "Gen Z female luxury consumer beauty fashion culture trend",
+    "luxury fashion pop culture celebrity red carpet campaign",
+    "premium skincare fragrance bodycare grooming luxury trend",
+    "luxury beauty launch announced upcoming next week Europe",
+    "luxury retail beauty fashion Madrid Paris London event next week",
 ]
 
 WEEKLY_ANGLES = [
@@ -261,7 +250,7 @@ def is_within_date_range(date_str: str, days: int = 10) -> bool:
         article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
         return article_date >= datetime.now() - timedelta(days=days)
     except Exception:
-        return True
+        return False
 
 
 def get_editorial_window() -> str:
@@ -296,7 +285,7 @@ def tavily_search(query: str, max_results: int = 8) -> list:
         "days":               14,
         "max_results":        max_results,
         "include_answer":     False,
-        "include_raw_content": True,
+        "include_raw_content": False,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -461,11 +450,14 @@ Maximo 3 items por seccion. En agenda, no_perder_de_vista e ideas_accionables, m
 
 def generate_briefing(articles: list, memory: dict) -> dict:
     """
-    Envía las noticias a Groq (llama-3.3-70b) con el system prompt
+    Envía las noticias a Groq con el system prompt
     y devuelve el briefing como diccionario Python.
     Usa presupuestos progresivamente mas compactos para respetar
-    el limite gratuito de Groq (12k TPM).
+    el limite gratuito de Groq.
     """
+    if not articles:
+        raise RuntimeError("No se encontraron noticias validas; se cancela el envio.")
+
     log.info("Generando briefing con Groq...")
     client = Groq(api_key=GROQ_API_KEY)
 
@@ -509,49 +501,111 @@ NOTICIAS:
 
 Genera un briefing semanal fresco. Maximo {budget['items']} items por seccion. Si dos noticias cuentan basicamente la misma historia, usa solo la mas concreta y convierte la otra en contexto, no en otra tarjeta. Devuelve JSON completo y valido; no cortes cadenas a medias."""
 
-        log.info(
-            "Groq intento %s: %s articulos, %s chars/articulo, max_tokens=%s",
-            idx,
-            budget["articles"],
-            budget["desc_chars"],
-            budget["max_tokens"],
-        )
-
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_prompt},
-                ],
-                temperature=0.25,
-                max_tokens=budget["max_tokens"],
-                response_format={"type": "json_object"},
-            )
-
-            text  = response.choices[0].message.content
-            clean = text.replace("```json", "").replace("```", "").strip()
-            briefing = json.loads(clean)
-            log.info("Briefing generado correctamente")
-            return briefing
-        except json.JSONDecodeError as e:
-            last_error = e
-            log.warning(
-                "Groq devolvio JSON incompleto en el intento %s: %s. Reintentando compacto...",
+        retry_compact = False
+        for model in GROQ_MODELS:
+            log.info(
+                "Groq intento %s con %s: %s articulos, %s chars/articulo, max_tokens=%s",
                 idx,
-                e,
+                model,
+                budget["articles"],
+                budget["desc_chars"],
+                budget["max_tokens"],
             )
+
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user",   "content": user_prompt},
+                    ],
+                    temperature=0.25,
+                    max_tokens=budget["max_tokens"],
+                    response_format={"type": "json_object"},
+                )
+
+                text = response.choices[0].message.content or ""
+                clean = text.replace("```json", "").replace("```", "").strip()
+                briefing = json.loads(clean)
+                log.info("Briefing generado correctamente con %s", model)
+                return briefing
+            except json.JSONDecodeError as e:
+                last_error = e
+                retry_compact = True
+                log.warning(
+                    "Groq devolvio JSON incompleto en el intento %s: %s. "
+                    "Reintentando compacto...",
+                    idx,
+                    e,
+                )
+                break
+            except Exception as e:
+                last_error = e
+                error_text = str(e)
+                if any(
+                    marker in error_text
+                    for marker in ("model_not_found", "does not exist", "do not have access", "403")
+                ):
+                    log.warning("Modelo Groq no disponible (%s); probando fallback.", model)
+                    continue
+                if any(
+                    marker in error_text
+                    for marker in ("413", "Request too large", "TPM", "429")
+                ):
+                    retry_compact = True
+                    log.warning(
+                        "Groq rechazo el intento %s por tamano o cuota. "
+                        "Reintentando compacto...",
+                        idx,
+                    )
+                    break
+                log.error("Error generando briefing: %s", error_text)
+                raise
+
+        if retry_compact:
             continue
-        except Exception as e:
-            last_error = e
-            error_text = str(e)
-            if "413" in error_text or "Request too large" in error_text or "TPM" in error_text:
-                log.warning("Groq rechazo el intento %s por tamano. Reintentando compacto...", idx)
-                continue
-            log.error("Error generando briefing: %s", error_text)
-            raise
 
     raise last_error
+
+
+def build_fallback_briefing(articles: list) -> dict:
+    """Genera una edición básica sin IA para no perder el envío semanal."""
+    def to_item(article: dict) -> dict:
+        description = re.sub(r"\s+", " ", article.get("description", "")).strip()
+        if len(description) > 320:
+            description = description[:317].rstrip() + "..."
+        return {
+            "marca": article.get("source", ""),
+            "casa": article.get("source", ""),
+            "titulo": article.get("title", ""),
+            "descripcion": description or "Consulta la fuente para ampliar la noticia.",
+            "fuente": article.get("source", ""),
+            "url": article.get("url", ""),
+            "es_espana": any(
+                marker in (
+                    article.get("title", "") + " " + article.get("description", "")
+                ).lower()
+                for marker in ("spain", "españa", "madrid", "barcelona")
+            ),
+        }
+
+    selected = [to_item(article) for article in articles[:9]]
+    return {
+        "semana": datetime.now(SPAIN_TZ).strftime("%d de %B de %Y"),
+        "frase_semana": "Edición de respaldo: noticias verificadas sin resumen de IA.",
+        "tendencias": [],
+        "novedades": selected[:3],
+        "noticias_casas_lujo": selected[3:6],
+        "ysl_y_competencia": selected[6:9],
+        "digital_social": {},
+        "radar_moda_cultura": [],
+        "agenda_semana": [],
+        "ideas_accionables": [],
+        "para_comentar_con_jefa": [],
+        "no_perder_de_vista": [],
+        "el_rincon": {},
+        "posts_linkedin": [],
+    }
 
 
 # ─────────────────────────────────────────────────────
@@ -566,6 +620,20 @@ C_TEXT       = "#2d2d2d"   # Texto principal casi negro
 C_TEXT_LIGHT = "#7a6f6a"   # Texto secundario gris cálido
 C_BORDER     = "#e8e0d8"   # Bordes suaves
 C_TAG_BG     = "#f5ede8"   # Fondo de etiquetas y tarjetas de tendencia
+
+
+def sanitize_for_html(value, key: str = ""):
+    """Escapa texto generado y permite solo URLs HTTP(S) en el email."""
+    if isinstance(value, dict):
+        return {k: sanitize_for_html(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [sanitize_for_html(item, key) for item in value]
+    if isinstance(value, str):
+        if key == "url":
+            parsed = urllib.parse.urlparse(value)
+            return html.escape(value, quote=True) if parsed.scheme in {"http", "https"} else ""
+        return html.escape(value, quote=True)
+    return value
 
 
 def spain_badge() -> str:
@@ -823,6 +891,8 @@ def linkedin_card(post_data: dict, num: int) -> str:
 
 def render_email_html(data: dict, recipient_name: str) -> str:
     """Construye el HTML completo del email a partir del JSON del briefing."""
+    data = sanitize_for_html(data)
+    recipient_name = html.escape(recipient_name, quote=True)
     fecha = data.get("semana", datetime.now().strftime("%d de %B de %Y"))
     frase = data.get("frase_semana", "")
 
@@ -1181,19 +1251,24 @@ def render_email_html(data: dict, recipient_name: str) -> str:
 # ─────────────────────────────────────────────────────
 
 def send_email(html_body: str, subject: str):
-    """Envía el email al destinatario principal y a la copia del autor."""
+    """Envía el email al destinatario principal y, opcionalmente, a una copia."""
     log.info(f"Enviando email a {RECIPIENT_EMAIL}...")
     msg            = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"Beauty Briefing <{GMAIL_USER}>"
     msg["To"]      = RECIPIENT_EMAIL
 
-    # Lista de destinatarios: novia + copia para el autor
-    recipients = [RECIPIENT_EMAIL, "jhuertaspresmanes@icloud.com"]
+    recipients = [RECIPIENT_EMAIL]
+    if CC_EMAIL:
+        recipients.append(CC_EMAIL)
+        msg["Cc"] = CC_EMAIL
 
+    plain_body = html.unescape(re.sub(r"<[^>]+>", " ", html_body))
+    plain_body = re.sub(r"\s+", " ", plain_body).strip()
+    msg.attach(MIMEText(plain_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_USER, recipients, msg.as_string())
 
@@ -1215,15 +1290,17 @@ def main():
 
     # 2. Buscar noticias nuevas con Tavily
     articles = fetch_news(memory)
+    if not articles:
+        raise RuntimeError("Tavily no devolvio noticias validas; se cancela el envio.")
 
     # 3. Generar el briefing con Groq
-    briefing = generate_briefing(articles, memory)
+    try:
+        briefing = generate_briefing(articles, memory)
+    except Exception:
+        log.exception("Groq no disponible; se enviara una edicion de respaldo sin IA.")
+        briefing = build_fallback_briefing(articles)
 
-    # 4. Actualizar y guardar la memoria
-    update_memory(memory, briefing)
-    save_memory(memory)
-
-    # 5. Renderizar el email y enviarlo
+    # 4. Renderizar el email
     fecha_bonita = datetime.now(SPAIN_TZ).strftime("%d de %B de %Y")
     subject      = f"Tu beauty briefing - {fecha_bonita}"
     html         = render_email_html(briefing, RECIPIENT_NAME)
@@ -1231,8 +1308,14 @@ def main():
     if TEST_MODE:
         log.info("TEST MODE - email no enviado. Briefing generado:")
         log.info(json.dumps(briefing, ensure_ascii=False, indent=2))
+        with open("briefing_preview.html", "w", encoding="utf-8") as preview:
+            preview.write(html)
+        log.info("Vista previa guardada en briefing_preview.html; memoria sin cambios.")
     else:
         send_email(html, subject)
+        # Solo marcar noticias como vistas después de confirmar el envío.
+        update_memory(memory, briefing)
+        save_memory(memory)
 
     log.info("Agente completado")
 

@@ -2,10 +2,10 @@ name: YSL Beauty Intelligence Briefing
 
 on:
   schedule:
-    # Mondays at 08:30 in Spain. GitHub cron runs in UTC, so we schedule both
-    # possible UTC times and keep only the one matching Europe/Madrid locally.
-    - cron: '30 6 * * 1'
-    - cron: '30 7 * * 1'
+    # Lunes a primera hora. La zona IANA mantiene la hora en verano e invierno.
+    # Se evita el minuto 0 para reducir retrasos por carga de GitHub Actions.
+    - cron: '17 7 * * 1'
+      timezone: 'Europe/Madrid'
 
   workflow_dispatch:
     inputs:
@@ -24,41 +24,20 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5.6.0
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Check Spain delivery time
-        id: schedule_gate
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          local_time="$(TZ=Europe/Madrid date +%H:%M)"
-          echo "Current time in Spain: $local_time"
-
-          if [ "$local_time" = "08:30" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Run briefing agent
-        if: steps.schedule_gate.outputs.should_run == 'true'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
@@ -66,21 +45,31 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           RECIPIENT_NAME: ${{ secrets.RECIPIENT_NAME }}
+          CC_EMAIL: ${{ secrets.CC_EMAIL }}
+          GROQ_MODELS: ${{ vars.GROQ_MODELS }}
           TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
         run: python briefing_agent.py
 
       - name: Guardar memoria en el repo
-        if: always() && steps.schedule_gate.outputs.should_run == 'true'
+        if: success() && (github.event_name == 'schedule' || github.event.inputs.test_mode != 'true')
         run: |
           git config user.name "Beauty Briefing Bot"
           git config user.email "bot@briefing.local"
-          git add memory.json || true
+          git add memory.json
           git diff --staged --quiet || git commit -m "Update memory [skip ci]"
-          git push || true
+          git push
+
+      - name: Upload test preview
+        if: success() && github.event_name == 'workflow_dispatch' && github.event.inputs.test_mode == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: briefing-preview-${{ github.run_id }}
+          path: briefing_preview.html
+          retention-days: 7
 
       - name: Upload logs on failure
-        if: failure() && steps.schedule_gate.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v4
+        if: failure()
+        uses: actions/upload-artifact@v6
         with:
           name: briefing-error-logs-${{ github.run_id }}
           path: briefing_agent.log

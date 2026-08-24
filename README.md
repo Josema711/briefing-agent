@@ -1,16 +1,18 @@
 # Beauty Briefing Agent
 
-Agente que genera y envía automáticamente un briefing semanal de belleza y lujo **cada lunes a las 9AM** usando GitHub Actions — sin servidores, sin cron local, 100% automático.
+Agente que genera y envía automáticamente un briefing semanal de belleza y lujo **cada lunes a las 07:17 (Europe/Madrid)** usando GitHub Actions — sin servidores, sin cron local, 100% automático.
 
 ## Qué hace
 
 Cada lunes por la mañana, sin que nadie haga nada:
 
-1. **Busca noticias reales** con Tavily (búsqueda con contenido completo, no solo titulares)
+1. **Busca noticias reales** con Tavily
 2. **Filtra lo ya visto** — gracias a la memoria entre semanas, nunca repite una noticia
-3. **Genera el briefing** con Groq (llama-3.3-70b) en español
+3. **Genera el briefing** con Groq, usando modelos actuales con fallback automático
 4. **Envía el email** con diseño editorial en tonos nude y terracota
 5. **Guarda la memoria** automáticamente en el repo para la semana siguiente
+
+Si todos los modelos de Groq están temporalmente fuera de servicio, se envía una edición básica con las noticias y sus enlaces en lugar de perder el correo semanal.
 
 ## Qué incluye el email
 
@@ -28,8 +30,8 @@ Si hay noticias de España, aparecen primero con badge 🇪🇸 dentro de su sec
 
 | Herramienta | Para qué | Coste |
 |---|---|---|
-| **Tavily API** | Búsqueda de noticias con contenido real | Gratis hasta 1.000 búsquedas/mes |
-| **Groq API** | IA para generar el briefing (llama-3.3-70b) | Gratis |
+| **Tavily API** | Búsqueda de noticias | 1.000 créditos gratuitos/mes |
+| **Groq API** | IA (`openai/gpt-oss-120b` + fallbacks) | Cuota gratuita |
 | **Gmail SMTP** | Envío del email | Gratis |
 | **GitHub Actions** | Automatización del cron semanal + logs | Gratis |
 
@@ -84,19 +86,26 @@ Ve a tu repo → **Settings → Secrets and variables → Actions → New reposi
 | `GMAIL_APP_PASSWORD` | Los 16 caracteres del App Password |
 | `RECIPIENT_EMAIL` | El correo de la destinataria |
 | `RECIPIENT_NAME` | Su nombre (para el saludo) |
+| `CC_EMAIL` | Opcional: dirección que recibirá una copia visible |
+
+Opcionalmente puedes crear una variable de repositorio llamada `GROQ_MODELS` para cambiar el orden de modelos. Si no existe, se usa:
+
+```text
+openai/gpt-oss-120b,qwen/qwen3.6-27b,openai/gpt-oss-20b
+```
 
 ### 4. Probar antes del lunes
 
 En GitHub → **Actions → YSL Beauty Intelligence Briefing → Run workflow**
 
-- `test_mode: true` → genera el briefing pero **no envía el email** (para verificar que todo funciona)
+- `test_mode: true` → genera el briefing, no envía email ni modifica la memoria, y sube una vista previa HTML
 - `test_mode: false` → envío real
 
 ---
 
 ## Cómo funciona la memoria
 
-Después de cada ejecución, el agente guarda en `memory.json` las URLs y temas cubiertos esa semana. La siguiente semana los filtra antes de buscar, así el contenido siempre es fresco.
+Después de cada envío confirmado, el agente guarda en `memory.json` las URLs y temas cubiertos esa semana. La siguiente semana los filtra antes de buscar, así el contenido siempre es fresco.
 
 El archivo se actualiza solo — el workflow hace un `git commit` automático cada lunes con el mensaje `Update memory [skip ci]`. No tienes que tocar nada.
 
@@ -106,16 +115,11 @@ Guarda hasta **8 semanas de histórico** (~200 artículos) y luego borra lo más
 
 ## Horario
 
-El cron está configurado para **07:00 UTC**, que equivale a:
-- 🌞 **09:00 AM en verano** (España, UTC+2)
-- ⚠️ En invierno (octubre–marzo) llega a las 8AM. Para mantener las 9AM en invierno, cambia la línea del cron en `.github/workflows/weekly_briefing.yml`:
+El cron utiliza directamente la zona horaria `Europe/Madrid`, por lo que no hay que cambiarlo entre verano e invierno:
 
 ```yaml
-# Verano (UTC+2)
-- cron: '0 7 * * 1'
-
-# Invierno (UTC+1)
-- cron: '0 8 * * 1'
+- cron: '17 7 * * 1'
+  timezone: 'Europe/Madrid'
 ```
 
 ---
@@ -137,10 +141,13 @@ Si falla, GitHub sube el `briefing_agent.log` como artefacto descargable (guarda
 cp .env.example .env
 
 # Instala dependencias
-pip install groq
+pip install -r requirements.txt
 
 # Ejecuta en modo test (no envía email)
 TEST_MODE=true python briefing_agent.py
+
+# Pruebas unitarias
+python -m unittest discover -s tests -v
 
 # Ejecuta con envío real
 python briefing_agent.py
@@ -154,12 +161,13 @@ python briefing_agent.py
 briefing-agent/
 ├── .github/
 │   └── workflows/
-│       └── weekly_briefing.yml   # GitHub Actions — cron lunes 9AM
+│       └── weekly_briefing.yml   # GitHub Actions — lunes 07:17 Europe/Madrid
 ├── briefing_agent.py             # Script principal
 ├── memory.json                   # Memoria entre semanas (se actualiza solo)
 ├── requirements.txt              # groq
 ├── .env.example                  # Template para desarrollo local
 ├── .gitignore                    # .env y logs excluidos
+├── tests/                        # Pruebas sin APIs ni envío real
 └── README.md
 ```
 
