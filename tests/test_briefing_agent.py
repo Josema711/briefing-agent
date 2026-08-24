@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 os.environ.setdefault("TEST_MODE", "true")
@@ -39,6 +39,52 @@ class MemoryTests(unittest.TestCase):
     def test_recent_date_is_considered_recent(self):
         recent = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
         self.assertTrue(agent.is_within_date_range(recent))
+
+    def test_recent_rfc2822_date_is_considered_recent(self):
+        recent = (datetime.now() - timedelta(days=2)).strftime(
+            "%a, %d %b %Y 10:30:00 GMT"
+        )
+        self.assertTrue(agent.is_within_date_range(recent))
+
+    def test_business_sales_headline_is_not_treated_as_seo(self):
+        article = {
+            "title": "Luxury beauty sales rise after fragrance launches",
+            "description": "Quarterly results and market analysis.",
+        }
+        self.assertTrue(agent.is_actual_news(article))
+
+    def test_gift_guide_headline_is_treated_as_seo(self):
+        self.assertFalse(agent.is_actual_news({"title": "The ultimate beauty gift guide"}))
+
+
+class TavilyTests(unittest.TestCase):
+    @patch("briefing_agent.urllib.request.urlopen")
+    def test_search_accepts_result_without_published_date(self, urlopen):
+        response = MagicMock()
+        response.read.return_value = json.dumps(
+            {
+                "results": [
+                    {
+                        "title": "YSL Beauty launches a new fragrance campaign",
+                        "url": "https://example.com/story",
+                        "content": "A new campaign launches across Europe.",
+                    }
+                ]
+            }
+        ).encode("utf-8")
+        response.__enter__.return_value = response
+        urlopen.return_value = response
+
+        results = agent.tavily_search("luxury beauty news")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["publishedAt"], "")
+        request = urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload["search_depth"], "basic")
+        self.assertIn("start_date", payload)
+        self.assertNotIn("api_key", payload)
+        self.assertTrue(request.headers["Authorization"].startswith("Bearer "))
 
 
 class RenderingTests(unittest.TestCase):

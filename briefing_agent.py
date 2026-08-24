@@ -11,6 +11,7 @@ import urllib.request
 import urllib.parse
 import re
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
@@ -225,7 +226,8 @@ BAD_KEYWORDS = [
     "best beauty looks",
     "shopping list",
     "memorial day sale",
-    "sale",
+    "on sale",
+    "sale picks",
     "review",
     "ranking",
     "best products",
@@ -240,17 +242,38 @@ BAD_KEYWORDS = [
 
 def is_actual_news(article: dict) -> bool:
     """Devuelve False si el artículo parece contenido SEO o evergreen."""
-    text = (article.get("title", "") + " " + article.get("description", "")).lower()
-    return not any(k in text for k in BAD_KEYWORDS)
+    # Las señales SEO deben aparecer en el título. Buscar también en todo el
+    # contenido descartaba noticias de negocio legítimas que mencionaban
+    # "sales", "review" o "ranking" en el cuerpo del artículo.
+    title = article.get("title", "").lower()
+    return not any(keyword in title for keyword in BAD_KEYWORDS)
+
+
+def parse_article_date(date_str: str):
+    """Convierte fechas ISO o RFC 2822 de Tavily a ``date``."""
+    if not isinstance(date_str, str) or not date_str.strip():
+        return None
+
+    value = date_str.strip()
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+
+    try:
+        return parsedate_to_datetime(value).date()
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def is_within_date_range(date_str: str, days: int = 10) -> bool:
     """Comprueba que el artículo es de los últimos N días."""
-    try:
-        article_date = datetime.strptime(date_str[:10], "%Y-%m-%d")
-        return article_date >= datetime.now() - timedelta(days=days)
-    except Exception:
+    article_date = parse_article_date(date_str)
+    if article_date is None:
         return False
+
+    today = datetime.now(SPAIN_TZ).date()
+    return today - timedelta(days=days) <= article_date <= today + timedelta(days=1)
 
 
 def get_editorial_window() -> str:
@@ -275,14 +298,16 @@ def get_weekly_angle() -> str:
 # BÚSQUEDA CON TAVILY
 # ─────────────────────────────────────────────────────
 
-def tavily_search(query: str, max_results: int = 8) -> list:
+def tavily_search(query: str, max_results: int = 8, topic: str = "news") -> list:
     """Lanza una búsqueda en Tavily y devuelve los artículos filtrados."""
+    today = datetime.now(SPAIN_TZ).date()
     payload = json.dumps({
-        "api_key":            TAVILY_API_KEY,
         "query":              query,
-        "topic":              "news",
-        "search_depth":       "advanced",
-        "days":               14,
+        "topic":              topic,
+        "search_depth":       "basic",
+        "start_date":         (today - timedelta(days=14)).isoformat(),
+        # Tavily interpreta end_date como límite superior; mañana incluye hoy.
+        "end_date":           (today + timedelta(days=1)).isoformat(),
         "max_results":        max_results,
         "include_answer":     False,
         "include_raw_content": False,
@@ -291,20 +316,32 @@ def tavily_search(query: str, max_results: int = 8) -> list:
     req = urllib.request.Request(
         "https://api.tavily.com/search",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {TAVILY_API_KEY}",
+            "Content-Type": "application/json",
+        },
     )
 
     with urllib.request.urlopen(req, timeout=30) as resp:
         data = json.loads(resp.read().decode())
 
     articles = []
+    missing_or_unknown_date = 0
+    discarded_old = 0
+    discarded_seo = 0
 
     for r in data.get("results", []):
         published_date = r.get("published_date")
+        parsed_date = parse_article_date(published_date)
 
-        # Descartar si no tiene fecha o es demasiado antiguo
-        if not published_date or not is_within_date_range(published_date, days=14):
+        # La API ya limita por start_date/end_date. Si además entrega una fecha
+        # reconocible, hacemos una segunda validación local. Algunos resultados
+        # válidos no incluyen published_date o lo devuelven en formato RFC 2822.
+        if parsed_date and not is_within_date_range(published_date, days=14):
+            discarded_old += 1
             continue
+        if parsed_date is None:
+            missing_or_unknown_date += 1
 
         source = urllib.parse.urlparse(r.get("url", "")).netloc.replace("www.", "")
 
@@ -314,15 +351,26 @@ def tavily_search(query: str, max_results: int = 8) -> list:
             "description": (r.get("content") or r.get("raw_content") or "")[:3500],
             "source":      source,
             "url":         r.get("url", ""),
-            "publishedAt": published_date,
+            "publishedAt": parsed_date.isoformat() if parsed_date else "",
         }
 
         # Descartar si no tiene título o parece SEO
         if not article["title"] or not is_actual_news(article):
+            discarded_seo += 1
             continue
 
         articles.append(article)
 
+    log.info(
+        "Tavily %s: %d recibidos, %d aceptados, %d sin fecha normalizada, "
+        "%d antiguos y %d SEO",
+        topic,
+        len(data.get("results", [])),
+        len(articles),
+        missing_or_unknown_date,
+        discarded_old,
+        discarded_seo,
+    )
     return articles
 
 
@@ -335,17 +383,31 @@ def fetch_news(memory: dict) -> list:
     all_articles = []
     seen_urls    = set()
 
-    for query in SEARCH_QUERIES:
-        try:
-            results = tavily_search(query)
-            for a in results:
-                url = a.get("url")
-                if not url or url in seen_urls:
-                    continue
-                seen_urls.add(url)
-                all_articles.append(a)
-        except Exception as e:
-            log.warning(f"Error busqueda '{query}': {e}")
+    def run_queries(queries: list, topic: str):
+        for query in queries:
+            try:
+                results = tavily_search(query, topic=topic)
+                for article in results:
+                    url = article.get("url")
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    all_articles.append(article)
+            except Exception as e:
+                log.warning(f"Error busqueda '{query}': {e}")
+
+    run_queries(SEARCH_QUERIES, "news")
+
+    # Tavily indica que news está orientado sobre todo a noticias mainstream.
+    # Para temas de beauty muy nicho, hacemos solo cinco búsquedas generales
+    # adicionales si la primera ronda no produjo nada. El coste máximo sigue
+    # muy por debajo de los 1.000 créditos gratuitos mensuales.
+    if not all_articles:
+        log.warning(
+            "La busqueda news no produjo resultados; reintentando 5 queries "
+            "con topic=general."
+        )
+        run_queries(SEARCH_QUERIES[:5], "general")
 
     def sort_key(article: dict):
         source = article.get("source", "")
